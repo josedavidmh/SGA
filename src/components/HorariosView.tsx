@@ -50,6 +50,7 @@ import {
   ActividadSeguimiento
 } from '../types';
 import { calcularComparativoCompetencias } from '../services/horasEjecutadasService';
+import { dialogo } from './DialogoSistema';
 import {
   exportarHorarioFichaExcel,
   exportarHorarioFichaPDF
@@ -577,7 +578,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   // Pegar el bloque copiado en una franja libre (duplicarlo con sus mismos
   // datos de competencia/RAPs/instructor, para agilizar el armado del horario
   // cuando se repite la misma asignación varias veces por semana).
-  const pegarBloque = (dia: DiaSemana, franja: FranjaHorario) => {
+  const pegarBloque = async (dia: DiaSemana, franja: FranjaHorario) => {
     if (!bloqueCopiado) return;
 
     if (bloqueCopiado.diaSemana === dia && bloqueCopiado.franja === franja) {
@@ -592,7 +593,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
     }
 
     if (bloqueCopiado.instructorId) {
-      avisarSiCompetenciaSobrepasada(bloqueCopiado.competenciaCodigo, bloqueCopiado.instructorNombre);
+      await avisarSiCompetenciaSobrepasada(bloqueCopiado.competenciaCodigo, bloqueCopiado.instructorNombre);
     }
     const { id: _id, ...datosBloque } = bloqueCopiado;
     onGuardarBloque({ ...datosBloque, diaSemana: dia, franja });
@@ -776,7 +777,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   // Aviso (no bloqueo): si la competencia ya pasó del 100% de su tiempo —
   // horas ejecutadas (SofiaPlus) contra horas planeadas, el mismo cálculo de
   // Seguimiento — se avisa al asignar instructor, pero se deja continuar.
-  const avisarSiCompetenciaSobrepasada = (compCodigo: string, instructorNombre?: string) => {
+  const avisarSiCompetenciaSobrepasada = async (compCodigo: string, instructorNombre?: string): Promise<void> => {
     const comp = competenciasPrograma.find(c => c.codigo === compCodigo);
     if (!comp) return;
     const regsFicha = registrosHorasEjecutadas.filter(r => r.fichaNumero === ficha.numero_ficha && r.competenciaCodigo === compCodigo);
@@ -787,16 +788,32 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
       actividades.filter(a => a.fichaId === ficha.id)
     );
     if (!item || item.horasTotalesPlaneadas <= 0 || item.porcentajeEjecucion <= 100) return;
-    alert(
-      `⚠ La competencia ya sobrepasó el 100% de su tiempo.\n\n` +
-      `${comp.codigo} — ${comp.denominacion}\n` +
-      `Horas ejecutadas: ${item.horasEjecutadas} h de ${item.horasTotalesPlaneadas} h planeadas (${item.porcentajeEjecucion}%).\n\n` +
-      `La asignación${instructorNombre ? ` de ${instructorNombre}` : ''} se realizará de todas formas.`
-    );
+    await dialogo.alerta({
+      tipo: 'advertencia',
+      titulo: 'Competencia por encima del 100% de su tiempo',
+      mensaje: `${comp.codigo} — ${comp.denominacion}`,
+      detalles: [
+        { etiqueta: 'Horas ejecutadas', valor: `${item.horasEjecutadas} h` },
+        { etiqueta: 'Horas planeadas', valor: `${item.horasTotalesPlaneadas} h` },
+        ...(instructorNombre ? [{ etiqueta: 'Instructor', valor: instructorNombre }] : [])
+      ],
+      porcentaje: item.porcentajeEjecucion,
+      nota: 'La asignación se realizará de todas formas.',
+      textoAceptar: 'Entendido, continuar'
+    });
   };
 
+  const confirmarDejarVacante = (instructorNombre?: string) =>
+    dialogo.confirmar({
+      tipo: 'advertencia',
+      titulo: `¿${instructorNombre || 'El instructor'} ya no continúa en este espacio?`,
+      mensaje: 'El bloque quedará VACANTE (programado, sin instructor) para reasignarlo después, sin perder el bloque ni el historial.',
+      textoAceptar: 'Sí, dejar vacante',
+      textoCancelar: 'Cancelar'
+    });
+
   // Manejador que valida cruces y perfil antes de asignar
-  const handleIntentarAsignarInstructor = (evaluacion: EvaluacionAfinidadInstructor) => {
+  const handleIntentarAsignarInstructor = async (evaluacion: EvaluacionAfinidadInstructor) => {
     const instructor = evaluacion.instructor;
     const conflicto = checkInstructorConflicto(instructor.id, selectedDia, selectedFranja);
     if (conflicto.hasConflicto) {
@@ -838,7 +855,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
       return;
     }
 
-    avisarSiCompetenciaSobrepasada(selectedCompetenciaCodigo, instructor.nombreCompleto);
+    await avisarSiCompetenciaSobrepasada(selectedCompetenciaCodigo, instructor.nombreCompleto);
 
     // Si el instructor NO tiene el perfil ni historial, mostrar advertencia interactiva pero permitir continuar
     if (evaluacion.requiereAdvertencia) {
@@ -1127,7 +1144,6 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                     {DIAS.map(d => {
                       const bloque = bloqueEnCelda(d, f.franja);
                       const isSelected = selectedDia === d && selectedFranja === f.franja;
-                      const isEjemploConflicto = d === 'Miércoles' && f.franja === '13:00 - 16:00';
 
                       // Retroalimentación en vivo mientras se arrastra un bloque: la
                       // celda bajo el cursor se marca en azul (destino válido) o rojo
@@ -1272,9 +1288,9 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                                     )}
                                     {bloque.instructorId && onQuitarInstructorDeBloque && (
                                       <button
-                                        onClick={(e) => {
+                                        onClick={async (e) => {
                                           e.stopPropagation();
-                                          if (confirm(`¿${bloque.instructorNombre} ya no continúa en este espacio? Quedará VACANTE (programado, sin instructor) para reasignarlo después, sin perder el bloque ni el historial.`)) {
+                                          if (await confirmarDejarVacante(bloque.instructorNombre)) {
                                             onQuitarInstructorDeBloque(bloque.id);
                                           }
                                         }}
@@ -1308,25 +1324,6 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                                   </div>
                                 )}
                               </div>
-                            </div>
-                          ) : isEjemploConflicto ? (
-                            <div className="h-full p-2.5 rounded-xl bg-[#FFDAD6]/70 border border-[#BA1A1A] text-[#BA1A1A] flex flex-col justify-between text-xs animate-pulse">
-                              <div>
-                                <div className="font-black text-[11px] flex items-center justify-between">
-                                  <span>Cruce Detectado</span>
-                                  <Lock className="w-3 h-3 text-[#BA1A1A]" />
-                                </div>
-                                <div className="text-[10px] font-bold mt-1 text-[#93000A]">
-                                  Ing. Carlos Mendoza
-                                </div>
-                                <div className="text-[10px] text-red-700 flex items-center space-x-1 mt-0.5 font-bold">
-                                  <AlertOctagon className="w-3 h-3 shrink-0" />
-                                  <span>Ficha 3115086</span>
-                                </div>
-                              </div>
-                              <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 bg-[#BA1A1A] text-white rounded text-center">
-                                Ocupado
-                              </span>
                             </div>
                           ) : bloqueCopiado && canEditHorarios ? (
                             <button
@@ -1865,7 +1862,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                   <button
                     type="button"
                     disabled={!instructorParaVacante}
-                    onClick={() => {
+                    onClick={async () => {
                       const inst = instructores.find(i => i.id === instructorParaVacante);
                       if (!inst) return;
                       const conflicto = checkInstructorConflicto(inst.id, bloqueDetalleModal.diaSemana, bloqueDetalleModal.franja);
@@ -1873,7 +1870,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                         alert(`¡BLOQUEO DE CRUCE PREVENTIVO!\nEl instructor ${inst.nombreCompleto} ya se encuentra asignado el día ${bloqueDetalleModal.diaSemana} en la franja ${bloqueDetalleModal.franja} en la Ficha ${conflicto.fichaNumero} (${conflicto.ambiente}).`);
                         return;
                       }
-                      avisarSiCompetenciaSobrepasada(bloqueDetalleModal.competenciaCodigo, inst.nombreCompleto);
+                      await avisarSiCompetenciaSobrepasada(bloqueDetalleModal.competenciaCodigo, inst.nombreCompleto);
                       onAsignarInstructorABloque(bloqueDetalleModal.id, inst);
                       mostrarToast(`${inst.nombreCompleto} ahora cubre este espacio`);
                       setInstructorParaVacante('');
@@ -1892,8 +1889,8 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                 <div className="flex items-center space-x-2">
                   {bloqueDetalleModal.instructorId && onQuitarInstructorDeBloque && (
                     <button
-                      onClick={() => {
-                        if (confirm(`¿${bloqueDetalleModal.instructorNombre} ya no continúa en este espacio? Quedará VACANTE (programado, sin instructor) para reasignarlo después, sin perder el bloque ni el historial.`)) {
+                      onClick={async () => {
+                        if (await confirmarDejarVacante(bloqueDetalleModal.instructorNombre)) {
                           onQuitarInstructorDeBloque(bloqueDetalleModal.id);
                           setBloqueDetalleModal(null);
                         }

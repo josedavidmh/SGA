@@ -374,15 +374,31 @@ export function caracterizarInstructoresDesdeHoras(
  * Evalúa si el perfil del instructor tiene afinidad profesional con la competencia seleccionada
  */
 export function verificarAfinidadPerfil(instructor: Instructor, competencia: Competencia): boolean {
-  const compTexto = `${competencia.codigo} ${competencia.denominacion} ${competencia.tipo}`.toLowerCase();
-  const instTexto = `${instructor.perfilTecnico} ${instructor.especialidad}`.toLowerCase();
+  // Se comparan sin tildes para que "Física"/"fisica" o "Ingeniería"/"ingenieria"
+  // coincidan igual, sin importar cómo se haya escrito el perfil del instructor.
+  const sinTildes = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const compTexto = sinTildes(`${competencia.codigo} ${competencia.denominacion} ${competencia.tipo}`);
+  const instTexto = sinTildes(`${instructor.perfilTecnico || ''} ${instructor.especialidad || ''}`);
+
+  // Perfiles de formación amplia: un ingeniero puede orientar matemáticas,
+  // física e investigación; un magíster/doctor puede orientar investigación.
+  const esIngeniero = instTexto.includes('ingenier') || /\bing\b/.test(instTexto);
+  const tienePosgradoInvestigacion =
+    instTexto.includes('maestr') || instTexto.includes('magister') || /\bmsc\b|\bm\.sc\b/.test(instTexto) ||
+    instTexto.includes('doctor') || /\bphd\b/.test(instTexto) || instTexto.includes('investig');
+
+  // Investigación (competencia transversal de investigación formativa)
+  const esInvestigacion = compTexto.includes('investigacion') || compTexto.includes('240201530');
+  if (esInvestigacion) {
+    return esIngeniero || tienePosgradoInvestigacion || instTexto.includes('metodolog') || instTexto.includes('cientific');
+  }
 
   // 1. Competencias Técnicas de Software / TI
   const esSoftware = compTexto.includes('software') || 
                      compTexto.includes('desarrollar') || 
                      compTexto.includes('requisitos') || 
                      compTexto.includes('algoritmos') || 
-                     compTexto.includes('diseñar la solución') || 
+                     compTexto.includes('disenar la solucion') || 
                      compTexto.includes('datos') || 
                      compTexto.includes('interfaz') || 
                      compTexto.includes('220501096') || 
@@ -394,57 +410,57 @@ export function verificarAfinidadPerfil(instructor: Instructor, competencia: Com
   if (esSoftware) {
     return instTexto.includes('sistemas') || 
            instTexto.includes('software') || 
-           instTexto.includes('informática') || 
-           instTexto.includes('programación') || 
+           instTexto.includes('informatica') || 
+           instTexto.includes('programacion') || 
            instTexto.includes('desarrollo') || 
-           instTexto.includes('ti') || 
-           instTexto.includes('computación');
+           /\bti\b|\btic\b/.test(instTexto) || 
+           instTexto.includes('computacion');
   }
 
   // 2. Bilingüismo / Inglés
-  const esIngles = compTexto.includes('inglés') || 
+  const esIngles = compTexto.includes('ingles') || 
                    compTexto.includes('inglesa') || 
                    compTexto.includes('biling') || 
                    compTexto.includes('240202501');
   if (esIngles) {
-    return instTexto.includes('inglés') || 
+    return instTexto.includes('ingles') || 
            instTexto.includes('idiomas') || 
            instTexto.includes('lenguas') || 
            instTexto.includes('biling') || 
-           instTexto.includes('filología');
+           instTexto.includes('filologia');
   }
 
   // 3. Matemáticas / Cuantitativo
-  const esMatematicas = compTexto.includes('matemática') || 
+  const esMatematicas = compTexto.includes('matematica') || 
                         compTexto.includes('cuantitativo') || 
                         compTexto.includes('240201528');
   if (esMatematicas) {
-    return instTexto.includes('matemátic') || 
-           instTexto.includes('estadístic') || 
-           instTexto.includes('físic') || 
+    return instTexto.includes('matematic') || 
+           instTexto.includes('estadistic') || 
+           instTexto.includes('fisic') || 
            instTexto.includes('ciencias exactas') || 
            instTexto.includes('sistemas') || 
-           instTexto.includes('ingenier');
+           esIngeniero;
   }
 
   // 4. Física / Ciencias Naturales
-  const esFisica = compTexto.includes('física') || 
+  const esFisica = compTexto.includes('fisica') || 
                    compTexto.includes('naturales') || 
                    compTexto.includes('220201501');
   if (esFisica) {
-    return instTexto.includes('físic') || 
+    return instTexto.includes('fisic') || 
            instTexto.includes('ciencias naturales') || 
-           instTexto.includes('químic') || 
-           instTexto.includes('ingenier');
+           instTexto.includes('quimic') || 
+           esIngeniero;
   }
 
   // 5. Ética / Integralidad / Enrique Low Murtra
-  const esEtica = compTexto.includes('ética') || 
+  const esEtica = compTexto.includes('etica') || 
                   compTexto.includes('low murtra') || 
                   compTexto.includes('cultura de paz') || 
                   compTexto.includes('240201526');
   if (esEtica) {
-    return instTexto.includes('ética') || 
+    return instTexto.includes('etica') || 
            instTexto.includes('humanidades') || 
            instTexto.includes('psicolog') || 
            instTexto.includes('trabajo social') || 
@@ -453,7 +469,7 @@ export function verificarAfinidadPerfil(instructor: Instructor, competencia: Com
   }
 
   // 6. Comunicación
-  const esComunicacion = compTexto.includes('comunicación') || 
+  const esComunicacion = compTexto.includes('comunicacion') || 
                          compTexto.includes('240201524');
   if (esComunicacion) {
     return instTexto.includes('comunicac') || 
@@ -471,7 +487,7 @@ export function verificarAfinidadPerfil(instructor: Instructor, competencia: Com
   if (esEmprendimiento) {
     return instTexto.includes('emprendimiento') || 
            instTexto.includes('administrac') || 
-           instTexto.includes('gestión') || 
+           instTexto.includes('gestion') || 
            instTexto.includes('negocios') || 
            instTexto.includes('econom');
   }
@@ -490,7 +506,7 @@ export function verificarAfinidadPerfil(instructor: Instructor, competencia: Com
   }
 
   // Si no coincide con ninguna categoría específica, considerar perfil afín si el tipo coincide
-  if (competencia.tipo === 'Técnica' && (instTexto.includes('ingenier') || instTexto.includes('tecnól') || instTexto.includes('sistemas'))) {
+  if (competencia.tipo === 'Técnica' && (esIngeniero || instTexto.includes('tecnol') || instTexto.includes('sistemas'))) {
     return true;
   }
 
