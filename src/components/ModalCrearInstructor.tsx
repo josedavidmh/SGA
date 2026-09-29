@@ -72,7 +72,7 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
   const [selectedColor, setSelectedColor] = React.useState(AVATAR_COLORS[0]);
   const [estado, setEstado] = React.useState<'ACTIVO' | 'INACTIVO'>('ACTIVO');
   const [crearUsuario, setCrearUsuario] = React.useState(true);
-  const [claveUsuario, setClaveUsuario] = React.useState('Sena2026*');
+  const [claveUsuario, setClaveUsuario] = React.useState('Sistema2026*');
   const [saving, setSaving] = React.useState(false);
 
   // Lista consolidada de especialidades temáticas
@@ -112,7 +112,7 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
       setSelectedColor(AVATAR_COLORS[0]);
       setEstado('ACTIVO');
       setCrearUsuario(true);
-      setClaveUsuario('Sena2026*');
+      setClaveUsuario('Sistema2026*');
     }
   }, [instructorParaEditar, isOpen]);
 
@@ -125,7 +125,7 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
       return;
     }
 
-    const emailOficial = email.trim() || `${nombres.toLowerCase().split(' ')[0]}.${apellidos.toLowerCase().split(' ')[0]}@misena.edu.co`;
+    const emailOficial = email.trim() || `${nombres.toLowerCase().split(' ')[0]}.${apellidos.toLowerCase().split(' ')[0]}@correo.edu.co`;
 
     const instructorPayload: Instructor = {
       // UUID real: la fila insertada en Supabase usa este mismo id (ver insertInstructorInSupabase),
@@ -137,7 +137,7 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
       apellidos: apellidos.trim(),
       nombreCompleto: `Ing. ${nombres.trim()} ${apellidos.trim()}`,
       email: emailOficial,
-      telefono: telefono.trim() || '312 000 0000',
+      telefono: telefono.trim(),
       perfilTecnico: perfilTecnico.trim() || 'Instructor de Formación Profesional Integral',
       especialidad,
       colorAvatar: selectedColor,
@@ -152,9 +152,14 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
 
     setSaving(true);
     let finalInst = instructorPayload;
+    let avisoSupabase: string | null = null;
     if (isSupabaseConfigured) {
       if (isEditing) {
-        await updateInstructorInSupabase(instructorPayload.id, instructorPayload);
+        const res = await updateInstructorInSupabase(instructorPayload.id, instructorPayload);
+        if (!res.success) {
+          console.error('Error al actualizar instructor en Supabase:', res.error);
+          avisoSupabase = res.error || 'Error desconocido al sincronizar con Supabase.';
+        }
       } else {
         const res = await insertInstructorInSupabase(instructorPayload);
         if (res.success && res.data && res.data[0]) {
@@ -162,12 +167,21 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
             ...instructorPayload,
             id: res.data[0].id || instructorPayload.id
           };
+        } else if (!res.success) {
+          // Antes esto se ignoraba en silencio y el modal mostraba éxito aunque
+          // el instructor NUNCA hubiera llegado a Supabase (solo quedaba en
+          // localStorage de este navegador). Ahora se avisa explícitamente.
+          console.error('Error al insertar instructor en Supabase:', res.error);
+          avisoSupabase = res.error || 'Error desconocido al sincronizar con Supabase.';
         }
       }
     }
     setSaving(false);
 
     onGuardarInstructor(finalInst, isEditing ? false : crearUsuario, claveUsuario);
+    if (avisoSupabase) {
+      alert(`El instructor se guardó localmente, pero NO se pudo sincronizar con Supabase (solo quedará en este navegador hasta corregirlo):\n\n${avisoSupabase}`);
+    }
     onClose();
   };
 
@@ -189,7 +203,7 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
               <p className="text-xs text-slate-500 font-medium">
                 {isEditing 
                   ? 'Modificación de perfil, especialidad temática e identificación'
-                  : 'Habilitación de instructores para la red de centros formativos SENA'}
+                  : 'Habilitación de instructores para la red de centros de formación'}
               </p>
             </div>
           </div>
@@ -206,7 +220,7 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
         <div className="mx-6 mt-4 p-3 bg-slate-50 rounded-2xl border border-slate-200/80 flex items-start space-x-2.5 text-slate-600 text-[11px] leading-relaxed">
           <ShieldCheck className="w-4 h-4 text-[#0D631B] shrink-0 mt-0.5" />
           <div>
-            <strong className="text-slate-800">Protección de Datos (No Sensibles):</strong> Se capturan únicamente datos de identificación institucional (Documento/Código, nombres, correo corporativo @misena y especialidad) para fines pedagógicos y asignación de horarios. No se solicitan datos financieros, médicos ni de residencia privada.
+            <strong className="text-slate-800">Protección de Datos (No Sensibles):</strong> Se capturan únicamente datos de identificación institucional (Documento/Código, nombres, correo corporativo y especialidad) para fines pedagógicos y asignación de horarios. No se solicitan datos financieros, médicos ni de residencia privada.
           </div>
         </div>
 
@@ -220,7 +234,7 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
               <input
                 type="text"
                 required
-                placeholder="C.C. o Código SENA"
+                placeholder="C.C. o código institucional"
                 value={documento}
                 onChange={(e) => setDocumento(e.target.value)}
                 className="w-full bg-[#F8F9FA] border border-slate-200 rounded-xl px-3 py-2 font-semibold text-[#111C2D] focus:ring-2 focus:ring-[#0D631B] outline-none"
@@ -252,10 +266,10 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="font-bold text-[#111C2D] block mb-1">Correo Institucional (@misena.edu.co)</label>
+              <label className="font-bold text-[#111C2D] block mb-1">Correo Institucional (@correo.edu.co)</label>
               <input
                 type="email"
-                placeholder="laura.gomez@misena.edu.co"
+                placeholder="laura.gomez@correo.edu.co"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-[#F8F9FA] border border-slate-200 rounded-xl px-3 py-2 font-medium text-[#111C2D] outline-none"
@@ -369,7 +383,7 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
                   <div>
                     <span className="text-[10px] text-slate-500 font-bold block mb-1">Correo de Acceso:</span>
                     <div className="font-mono text-[11px] text-slate-700 bg-white px-2.5 py-1.5 rounded-lg border border-emerald-200 truncate">
-                      {email.trim() || (nombres.trim() && apellidos.trim() ? `${nombres.toLowerCase().split(' ')[0]}.${apellidos.toLowerCase().split(' ')[0]}@misena.edu.co` : 'instructor@misena.edu.co')}
+                      {email.trim() || (nombres.trim() && apellidos.trim() ? `${nombres.toLowerCase().split(' ')[0]}.${apellidos.toLowerCase().split(' ')[0]}@correo.edu.co` : 'instructor@correo.edu.co')}
                     </div>
                   </div>
                   <div>
@@ -382,7 +396,7 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
                       value={claveUsuario}
                       onChange={(e) => setClaveUsuario(e.target.value)}
                       className="w-full font-mono text-[11px] bg-white px-2.5 py-1.5 rounded-lg border border-emerald-200 focus:border-[#0D631B] outline-none"
-                      placeholder="Sena2026*"
+                      placeholder="Sistema2026*"
                     />
                   </div>
                 </div>

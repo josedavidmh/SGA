@@ -1,26 +1,35 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  TrendingUp, 
-  Search, 
-  Download, 
-  ArrowRight, 
-  UserCheck, 
-  UserMinus, 
-  GraduationCap, 
+import {
+  TrendingUp,
+  Search,
+  Download,
+  ArrowRight,
+  GraduationCap,
   Filter,
   CheckCircle2,
   FileSpreadsheet,
   Calendar,
-  Layers,
   Trash2,
   Award,
   UploadCloud,
   FileCheck,
-  Pencil
+  Pencil,
+  BarChart3
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  LabelList
+} from 'recharts';
 import { Ficha, User, RegionalCentro, BloqueHorario, ActividadSeguimiento, ReporteJuiciosFicha, RapSeguimiento, ResultadoAprendizaje, TrimestreCalendario } from '../types';
 import { procesarJuiciosEvaluativosExcel, obtenerReporteDemoJuicios } from '../services/juiciosEvaluativosService';
-import { generarFormatoAsociacionFichas, generarFormatoEventos, formatoVisualTrimestre } from '../services/reportesOficialesService';
+import { generarFormatoAsociacionFichas, generarFormatoEventos } from '../services/reportesOficialesService';
 import { obtenerTrimestresDisponibles } from '../services/ambientesReporteService';
 import { ModalJuiciosEvaluativos } from './ModalJuiciosEvaluativos';
 
@@ -69,6 +78,7 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
   const [isUploadingJuicios, setIsUploadingJuicios] = useState(false);
   const fileInputJuiciosRef = React.useRef<HTMLInputElement>(null);
   const [trimestreReporteEventos, setTrimestreReporteEventos] = useState<string>('');
+  const [trimestreAsociacion, setTrimestreAsociacion] = useState<string>('');
 
   const handleUploadJuicios = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -150,32 +160,114 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
     });
   }, [fichas, filtroTipo, filtroNivel, searchTerm, currentUser]);
 
-  // Métricas agregadas
-  const metricas = useMemo(() => {
-    const list = fichasFiltradas;
-    const totalMatricula = list.reduce((acc, f) => acc + (f.matriculaInicial || 0), 0);
-    const totalActivos = list.reduce((acc, f) => acc + (f.aprendicesActivos || 0), 0);
-    const totalCancelados = list.reduce((acc, f) => acc + (f.aprendicesCancelados || 0), 0);
-    const totalRetiros = list.reduce((acc, f) => acc + (f.aprendicesRetiroVoluntario || 0), 0);
-    const totalDeserciones = totalCancelados + totalRetiros;
+  // Totales por Programa de Formación: agrupa las fichas filtradas por
+  // programaCodigo y suma matrícula/activos/deserciones — así el índice de
+  // deserción/retención que se ve es el del PROGRAMA completo (todas sus
+  // cohortes/fichas acumuladas), no solo el de una ficha suelta. Como cada
+  // ficha nueva del programa se suma al total, el índice del programa se
+  // actualiza progresivamente a medida que se registran o cierran cohortes.
+  interface GrupoPrograma {
+    programaCodigo: string;
+    programaNombre: string;
+    fichas: Ficha[];
+    totalMatricula: number;
+    totalActivos: number;
+    totalCancelados: number;
+    totalRetiros: number;
+    totalDeserciones: number;
+    tasaRetencion: number;
+    tasaDesercion: number;
+  }
 
-    const tasaRetencion = totalMatricula > 0 
-      ? Math.round((totalActivos / totalMatricula) * 1000) / 10 
-      : 0;
+  const gruposPorPrograma = useMemo<GrupoPrograma[]>(() => {
+    const mapa = new Map<string, GrupoPrograma>();
+    fichasFiltradas.forEach(f => {
+      const key = f.programaCodigo || f.programaNombre;
+      if (!mapa.has(key)) {
+        mapa.set(key, {
+          programaCodigo: f.programaCodigo,
+          programaNombre: f.programaNombre,
+          fichas: [],
+          totalMatricula: 0,
+          totalActivos: 0,
+          totalCancelados: 0,
+          totalRetiros: 0,
+          totalDeserciones: 0,
+          tasaRetencion: 0,
+          tasaDesercion: 0
+        });
+      }
+      const g = mapa.get(key)!;
+      g.fichas.push(f);
+      g.totalMatricula += f.matriculaInicial || 0;
+      g.totalActivos += f.aprendicesActivos || 0;
+      g.totalCancelados += f.aprendicesCancelados || 0;
+      g.totalRetiros += f.aprendicesRetiroVoluntario || 0;
+    });
 
-    const tasaDesercion = totalMatricula > 0 
-      ? Math.round((totalDeserciones / totalMatricula) * 1000) / 10 
-      : 0;
+    const grupos = Array.from(mapa.values()).map(g => {
+      g.totalDeserciones = g.totalCancelados + g.totalRetiros;
+      g.tasaRetencion = g.totalMatricula > 0 ? Math.round((g.totalActivos / g.totalMatricula) * 1000) / 10 : 0;
+      g.tasaDesercion = g.totalMatricula > 0 ? Math.round((g.totalDeserciones / g.totalMatricula) * 1000) / 10 : 0;
+      // Fichas ordenadas cronológicamente por periodo lectivo, para que el
+      // total se lea como algo que se acumula cohorte a cohorte.
+      g.fichas = [...g.fichas].sort((a, b) => (a.periodoLectivo || '').localeCompare(b.periodoLectivo || ''));
+      return g;
+    });
 
-    return {
-      totalProgramas: list.length,
-      totalMatricula,
-      totalActivos,
-      totalDeserciones,
-      tasaRetencion,
-      tasaDesercion
-    };
+    return grupos.sort((a, b) => a.programaNombre.localeCompare(b.programaNombre));
   }, [fichasFiltradas]);
+
+  // Reporte Gráfico: retención y deserción agregadas por AÑO y por TRIMESTRE
+  // (periodoLectivo de cada ficha, mismo formato "AAAA-ROMANO" de Horarios).
+  // Cada ficha aporta su matrícula/activos/deserciones al periodo en el que
+  // quedó registrada, y la tasa de cada barra es el agregado ponderado por
+  // matrícula de todas las fichas de ese periodo — la misma metodología que
+  // ya se usa arriba para los Totales por Programa.
+  interface PuntoTendencia {
+    clave: string;
+    matricula: number;
+    activos: number;
+    deserciones: number;
+    tasaRetencion: number;
+    tasaDesercion: number;
+  }
+
+  const agregarPorClave = (obtenerClave: (f: Ficha) => string): PuntoTendencia[] => {
+    const mapa = new Map<string, { matricula: number; activos: number; cancelados: number; retiros: number }>();
+    fichasFiltradas.forEach(f => {
+      const key = obtenerClave(f) || 'Sin dato';
+      if (!mapa.has(key)) mapa.set(key, { matricula: 0, activos: 0, cancelados: 0, retiros: 0 });
+      const g = mapa.get(key)!;
+      g.matricula += f.matriculaInicial || 0;
+      g.activos += f.aprendicesActivos || 0;
+      g.cancelados += f.aprendicesCancelados || 0;
+      g.retiros += f.aprendicesRetiroVoluntario || 0;
+    });
+    return Array.from(mapa.entries())
+      .map(([clave, g]) => {
+        const deserciones = g.cancelados + g.retiros;
+        return {
+          clave,
+          matricula: g.matricula,
+          activos: g.activos,
+          deserciones,
+          tasaRetencion: g.matricula > 0 ? Math.round((g.activos / g.matricula) * 1000) / 10 : 0,
+          tasaDesercion: g.matricula > 0 ? Math.round((deserciones / g.matricula) * 1000) / 10 : 0
+        };
+      })
+      .sort((a, b) => a.clave.localeCompare(b.clave));
+  };
+
+  const tendenciaPorTrimestre = useMemo(
+    () => agregarPorClave(f => f.periodoLectivo),
+    [fichasFiltradas]
+  );
+
+  const tendenciaPorAnio = useMemo(
+    () => agregarPorClave(f => (f.periodoLectivo || '').split('-')[0]),
+    [fichasFiltradas]
+  );
 
   // Trimestres con al menos un bloque de horario para la ficha que se está
   // viendo — son los únicos que realmente tienen datos para exportar en el
@@ -187,18 +279,29 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
     return obtenerTrimestresDisponibles(horarios.filter(h => h.fichaId === fichaRef.id));
   };
 
+  // Mismo formato que la Matriz de Horarios ("AAAA-ROMANO", ej. "2026-III").
   const etiquetaTrimestre = (nombre: string): string => {
     const cal = trimestresCalendario.find(t => t.nombre === nombre);
-    const visual = formatoVisualTrimestre(nombre);
-    return cal ? `${visual} (${cal.fechaInicio} a ${cal.fechaFin})` : visual;
+    return cal ? `${nombre} (${cal.fechaInicio} a ${cal.fechaFin})` : nombre;
   };
 
-  const handleDescargarAsociacionFichas = (targetFicha: Ficha | null) => {
+  const handleDescargarAsociacionFichas = (targetFicha: Ficha | null, trimestre: string = '') => {
     const fichaToExport = targetFicha || selectedFicha;
     if (!fichaToExport) {
       alert('Selecciona una ficha para exportar el Formato de Asociación de Fichas.');
       return;
     }
+
+    if (trimestre) {
+      const bloquesTrimestre = horarios.filter(h => h.fichaId === fichaToExport.id && h.trimestre === trimestre);
+      if (bloquesTrimestre.length === 0) {
+        alert(`No hay bloques de horario programados para la ficha ${fichaToExport.numero_ficha} en el trimestre ${trimestre}.`);
+        return;
+      }
+      generarFormatoAsociacionFichas(fichaToExport, [], { trimestre, bloquesTrimestre });
+      return;
+    }
+
     const seguimientoFicha = rapsSeguimiento.filter(
       s => s.fichaId === fichaToExport.id || s.fichaNumero === fichaToExport.numero_ficha
     );
@@ -225,15 +328,59 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
       return;
     }
     const catalogoRapsPrograma = raps.filter(r => r.programaCodigo === fichaToExport.programaCodigo);
-    const resultado = generarFormatoEventos(fichaToExport, centro, bloquesTrimestre, catalogoRapsPrograma, etiquetaTrimestre(trimestre));
-    if (resultado.festivosTotalesExcluidos > 0) {
-      alert(`Reporte generado. Se excluyeron ${resultado.festivosTotalesExcluidos} ocurrencia(s) por caer en día festivo colombiano — no se contaron como horas ejecutadas.`);
-    }
+    generarFormatoEventos(fichaToExport, centro, bloquesTrimestre, catalogoRapsPrograma, etiquetaTrimestre(trimestre)).then(resultado => {
+      if (resultado.festivosTotalesExcluidos > 0) {
+        alert(`Reporte generado. Se excluyeron ${resultado.festivosTotalesExcluidos} ocurrencia(s) por caer en día festivo colombiano — no se contaron como horas ejecutadas.`);
+      }
+    });
   };
 
   const handleVerFicha = (f: Ficha) => {
     onSelectFicha(f);
     setFichaModalDetalle(f);
+  };
+
+  const renderGraficoTendencia = (data: PuntoTendencia[]) => {
+    if (data.length === 0) {
+      return (
+        <div className="p-8 text-center text-xs text-slate-400 bg-slate-50/60 rounded-xl border border-slate-100">
+          No hay datos suficientes para graficar.
+        </div>
+      );
+    }
+    return (
+      <ResponsiveContainer width="100%" height={280}>
+        <BarChart data={data} margin={{ top: 24, right: 8, left: 0, bottom: 4 }} barGap={4}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+          <XAxis
+            dataKey="clave"
+            tick={{ fontSize: 11, fontWeight: 700, fill: '#64748B' }}
+            axisLine={{ stroke: '#E2E8F0' }}
+            tickLine={false}
+          />
+          <YAxis
+            domain={[0, 100]}
+            tickFormatter={(v: number) => `${v}%`}
+            tick={{ fontSize: 11, fill: '#94A3B8' }}
+            axisLine={false}
+            tickLine={false}
+            width={38}
+          />
+          <Tooltip
+            formatter={(value: any, name: any) => [`${value}%`, name]}
+            contentStyle={{ borderRadius: 12, border: '1px solid #E2E8F0', fontSize: 12, fontWeight: 600 }}
+            cursor={{ fill: '#F8FAFC' }}
+          />
+          <Legend wrapperStyle={{ fontSize: 11, fontWeight: 700 }} iconType="circle" />
+          <Bar dataKey="tasaRetencion" name="Tasa de Retención" fill="#0D631B" radius={[4, 4, 0, 0]} maxBarSize={40}>
+            <LabelList dataKey="tasaRetencion" position="top" formatter={(v: any) => `${v}%`} style={{ fontSize: 10, fontWeight: 700, fill: '#0D631B' }} />
+          </Bar>
+          <Bar dataKey="tasaDesercion" name="Tasa de Deserción" fill="#E74C3C" radius={[4, 4, 0, 0]} maxBarSize={40}>
+            <LabelList dataKey="tasaDesercion" position="top" formatter={(v: any) => `${v}%`} style={{ fontSize: 10, fontWeight: 700, fill: '#E74C3C' }} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    );
   };
 
   return (
@@ -275,14 +422,27 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
 
 
 
-          <button
-            onClick={() => handleDescargarAsociacionFichas(selectedFicha)}
-            className="flex items-center space-x-2 bg-white hover:bg-slate-50 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold text-[#111C2D] shadow-xs transition-colors"
-            title="Descargar el Formato oficial de Asociación de Fichas (F001-008-25 / V01)"
-          >
-            <Download className="w-4 h-4 text-[#005A8C]" />
-            <span>Asociación de Fichas</span>
-          </button>
+          <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-xl px-1.5 py-1 shadow-xs">
+            <select
+              value={trimestreAsociacion}
+              onChange={e => setTrimestreAsociacion(e.target.value)}
+              className="text-xs font-bold text-slate-600 bg-transparent px-1.5 py-1 focus:outline-hidden max-w-32"
+              title="Alcance del Formato de Asociación de Fichas"
+            >
+              <option value="">Total</option>
+              {trimestresDisponiblesParaFicha(selectedFicha).map(t => (
+                <option key={t} value={t}>{etiquetaTrimestre(t)}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => handleDescargarAsociacionFichas(selectedFicha, trimestreAsociacion)}
+              className="flex items-center space-x-2 bg-white hover:bg-slate-50 px-2.5 py-1.5 rounded-lg text-xs font-bold text-[#111C2D] transition-colors"
+              title="Descargar el Formato oficial de Asociación de Fichas (F001-008-25 / V01) — Total o por trimestre"
+            >
+              <Download className="w-4 h-4 text-[#005A8C]" />
+              <span>Asociación de Fichas</span>
+            </button>
+          </div>
 
           <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-xl px-1.5 py-1 shadow-xs">
             <select
@@ -305,106 +465,6 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
               <span>Reporte de Eventos</span>
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* Tarjetas de Resumen de Indicadores */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {/* 1. Retención Global */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
-              Tasa de Retención
-            </span>
-            <div className="w-7 h-7 rounded-lg bg-emerald-50 text-[#0D631B] flex items-center justify-center">
-              <UserCheck className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="flex items-baseline space-x-2">
-            <span className="text-3xl font-black text-[#0D631B]">
-              {metricas.tasaRetencion}%
-            </span>
-            <span className="text-xs text-slate-400 font-medium">Promedio</span>
-          </div>
-          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-3">
-            <div 
-              className="bg-[#0D631B] h-full rounded-full transition-all duration-500"
-              style={{ width: `${Math.min(metricas.tasaRetencion, 100)}%` }}
-            />
-          </div>
-          <div className="text-[11px] text-slate-500 font-medium mt-2 flex justify-between">
-            <span>{metricas.totalActivos} aprendices activos</span>
-            <span>de {metricas.totalMatricula}</span>
-          </div>
-        </div>
-
-        {/* 2. Deserción Registrada */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
-              Tasa de Deserción
-            </span>
-            <div className="w-7 h-7 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
-              <UserMinus className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="flex items-baseline space-x-2">
-            <span className="text-3xl font-black text-slate-900">
-              {metricas.tasaDesercion}%
-            </span>
-            <span className="text-xs text-slate-400 font-medium">{metricas.totalDeserciones} retiros/canc.</span>
-          </div>
-          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-3">
-            <div 
-              className="bg-red-500 h-full rounded-full transition-all duration-500"
-              style={{ width: `${Math.min(metricas.tasaDesercion * 4, 100)}%` }}
-            />
-          </div>
-          <div className="text-[11px] text-slate-500 font-medium mt-2">
-            Total deserciones en las cohortes evaluadas
-          </div>
-        </div>
-
-        {/* 3. Aprendices Activos */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
-              Aprendices en Formación
-            </span>
-            <div className="w-7 h-7 rounded-lg bg-blue-50 text-[#005A8C] flex items-center justify-center">
-              <GraduationCap className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="flex items-baseline space-x-2">
-            <span className="text-3xl font-black text-[#005A8C]">
-              {metricas.totalActivos}
-            </span>
-            <span className="text-xs text-slate-400 font-medium">Activos</span>
-          </div>
-          <p className="text-[11px] text-slate-500 font-medium mt-3.5">
-            De una matrícula acumulada de {metricas.totalMatricula} aprendices.
-          </p>
-        </div>
-
-        {/* 4. Total Fichas Monitoreadas */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
-              Total Fichas
-            </span>
-            <div className="w-7 h-7 rounded-lg bg-purple-50 text-[#6F43C0] flex items-center justify-center">
-              <Layers className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="flex items-baseline space-x-2">
-            <span className="text-3xl font-black text-[#6F43C0]">
-              {metricas.totalProgramas}
-            </span>
-            <span className="text-xs text-slate-400 font-medium">Cohortes</span>
-          </div>
-          <p className="text-[11px] text-slate-500 font-medium mt-3.5">
-            Mostrando {fichasFiltradas.length} de {fichas.length} programas disponibles.
-          </p>
         </div>
       </div>
 
@@ -480,7 +540,7 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
             </p>
           </div>
           <div className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-xl self-start sm:self-auto">
-            Total Programas: {fichasFiltradas.length}
+            Programas: {gruposPorPrograma.length} · Fichas: {fichasFiltradas.length}
           </div>
         </div>
 
@@ -499,8 +559,44 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
-              {fichasFiltradas.length > 0 ? (
-                fichasFiltradas.map((f) => {
+              {gruposPorPrograma.length > 0 ? (
+                gruposPorPrograma.map((grupo) => (
+                  <React.Fragment key={grupo.programaCodigo || grupo.programaNombre}>
+                    {/* Fila de Total del Programa: suma de todas sus fichas/cohortes —
+                        se actualiza progresivamente a medida que se registran o cierran fichas. */}
+                    <tr className="bg-slate-50/80 border-y border-slate-200">
+                      <td colSpan={8} className="py-2.5 px-3">
+                        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1.5">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Total Programa</span>
+                            <span className="font-bold text-slate-900 text-xs">{grupo.programaNombre}</span>
+                            <span className="text-[10px] font-bold text-slate-400">
+                              ({grupo.fichas.length} {grupo.fichas.length === 1 ? 'ficha' : 'fichas'})
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] font-bold text-slate-600">
+                            <span>Matrícula: <span className="text-slate-900">{grupo.totalMatricula}</span></span>
+                            <span>Activos: <span className="text-emerald-700">{grupo.totalActivos}</span></span>
+                            <span>Deserciones: <span className="text-red-700">{grupo.totalDeserciones}</span></span>
+                            <span>
+                              Retención:{' '}
+                              <span className={
+                                grupo.tasaRetencion >= 90 ? 'text-[#0D631B]' : grupo.tasaRetencion >= 80 ? 'text-[#E67E22]' : 'text-[#E74C3C]'
+                              }>
+                                {grupo.tasaRetencion}%
+                              </span>
+                            </span>
+                            <span>
+                              Deserción:{' '}
+                              <span className={grupo.tasaDesercion > 8 ? 'text-red-700' : 'text-slate-700'}>
+                                {grupo.tasaDesercion}%
+                              </span>
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                    {grupo.fichas.map((f) => {
                   const desercionesFicha = (f.aprendicesCancelados || 0) + (f.aprendicesRetiroVoluntario || 0);
                   const retencion = f.tasaRetencion || 0;
                   const desercion = f.tasaDesercion || 0;
@@ -635,8 +731,10 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
                         </div>
                       </td>
                     </tr>
-                  );
-                })
+                      );
+                    })}
+                  </React.Fragment>
+                ))
               ) : (
                 <tr>
                   <td colSpan={8} className="py-12 text-center">
@@ -666,6 +764,38 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Reporte Gráfico: Retención y Deserción por Año y por Trimestre */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs">
+        <div className="flex items-center space-x-2.5 mb-5">
+          <div className="w-9 h-9 rounded-xl bg-emerald-50 text-[#0D631B] flex items-center justify-center shrink-0">
+            <BarChart3 className="w-4.5 h-4.5" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-[#111C2D]">
+              Reporte Gráfico: Retención y Deserción
+            </h2>
+            <p className="text-xs text-slate-500">
+              Tendencia agregada (ponderada por matrícula) de todas las fichas visibles con los filtros actuales.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div>
+            <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2">
+              Por Trimestre
+            </h3>
+            {renderGraficoTendencia(tendenciaPorTrimestre)}
+          </div>
+          <div>
+            <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2">
+              Por Año
+            </h3>
+            {renderGraficoTendencia(tendenciaPorAnio)}
+          </div>
         </div>
       </div>
 
@@ -803,13 +933,26 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
                 </button>
               )}
 
-              <button
-                onClick={() => handleDescargarAsociacionFichas(fichaModalDetalle)}
-                className="w-full py-2 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center space-x-2 transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                <span>Descargar Asociación de Fichas</span>
-              </button>
+              <div className="flex items-center space-x-1.5">
+                <select
+                  value={trimestreAsociacion}
+                  onChange={e => setTrimestreAsociacion(e.target.value)}
+                  className="flex-1 py-2 px-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs focus:outline-hidden"
+                  title="Alcance del Formato de Asociación de Fichas"
+                >
+                  <option value="">Total</option>
+                  {trimestresDisponiblesParaFicha(fichaModalDetalle).map(t => (
+                    <option key={t} value={t}>{etiquetaTrimestre(t)}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => handleDescargarAsociacionFichas(fichaModalDetalle, trimestreAsociacion)}
+                  className="flex-1 py-2 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center space-x-2 transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Asociación de Fichas</span>
+                </button>
+              </div>
 
               <div className="flex items-center space-x-1.5">
                 <select

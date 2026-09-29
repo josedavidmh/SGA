@@ -1,24 +1,21 @@
 import React, { useState } from 'react';
-import { 
-  Lock, 
-  Mail, 
-  Eye, 
-  EyeOff, 
-  ArrowRight, 
-  ShieldCheck, 
-  AlertCircle, 
-  GraduationCap, 
-  KeyRound,
-  ChevronDown,
-  Download,
-  Github,
-  ExternalLink
+import bcrypt from 'bcryptjs';
+import {
+  Lock,
+  Mail,
+  Eye,
+  EyeOff,
+  ArrowRight,
+  ShieldCheck,
+  AlertCircle,
+  GraduationCap
 } from 'lucide-react';
 import { User } from '../types';
+import { AcercaDeModal } from './AcercaDeModal';
 
 interface LoginViewProps {
   usuariosDisponibles: User[];
-  onLoginSuccess: (user: User) => void;
+  onLoginSuccess: (user: User, claveIngresada: string) => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({
@@ -31,7 +28,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [recordarSesion, setRecordarSesion] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [mostrarGuiaPruebas, setMostrarGuiaPruebas] = useState<boolean>(false);
+  const [mostrarAcercaDe, setMostrarAcercaDe] = useState<boolean>(false);
 
   // Intentar login por credenciales
   const handleSubmit = (e: React.FormEvent) => {
@@ -57,18 +54,29 @@ export const LoginView: React.FC<LoginViewProps> = ({
       // Buscar usuario en la base de usuarios disponibles
       const userFound = usuariosDisponibles.find(
         u => u.correo.toLowerCase() === emailTrimmed ||
-             (u.rol === 'ADMINISTRADOR' && (emailTrimmed === 'admin' || emailTrimmed === 'admin@misena.edu.co' || emailTrimmed === 'admin@sena.edu.co'))
+             (u.rol === 'ADMINISTRADOR' && (emailTrimmed === 'admin' || emailTrimmed === 'admin@sga.edu.co' || emailTrimmed === 'admin@correo.edu.co' || emailTrimmed === 'admin@misena.edu.co' || emailTrimmed === 'admin@sena.edu.co'))
       );
 
       if (!userFound) {
         setIsLoading(false);
-        setErrorMessage('El correo electrónico no se encuentra registrado en el sistema SENA.');
+        setErrorMessage('El correo electrónico no se encuentra registrado en el sistema.');
         return;
       }
 
-      // Validar clave de acceso asignada
-      const validClave = userFound.clave || 'Sena2026*';
-      if (claveTrimmed !== validClave && claveTrimmed !== 'Sena2026*') {
+      // Validar clave de acceso asignada. Orden de intentos:
+      //   1) Texto plano guardado en ESTE navegador (rápido, sin esperar a bcrypt).
+      //   2) La clave maestra por defecto.
+      //   3) El hash bcrypt que sí viaja por Supabase — este es el que permite
+      //      iniciar sesión con la clave real desde un navegador/equipo distinto
+      //      al que la creó o la cambió por última vez (antes esto era imposible:
+      //      la clave nunca salía de localStorage, así que en un origen nuevo
+      //      solo la clave maestra funcionaba).
+      const claveLocalCoincide = userFound.clave && claveTrimmed === userFound.clave;
+      const claveMaestraCoincide = claveTrimmed === 'Sistema2026*';
+      const claveHashCoincide = !claveLocalCoincide && !claveMaestraCoincide && !!userFound.claveHash &&
+        bcrypt.compareSync(claveTrimmed, userFound.claveHash);
+
+      if (!claveLocalCoincide && !claveMaestraCoincide && !claveHashCoincide) {
         setIsLoading(false);
         setErrorMessage('La contraseña ingresada es incorrecta. Verifica la clave asignada.');
         return;
@@ -79,15 +87,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
         localStorage.setItem('sena_session_user_id', userFound.id);
       }
       setIsLoading(false);
-      onLoginSuccess(userFound);
+      onLoginSuccess(userFound, claveTrimmed);
     }, 450);
-  };
-
-  // Carga rápida de credenciales en el formulario para pruebas
-  const handleSeleccionarRolPrueba = (user: User) => {
-    setEmailInput(user.correo);
-    setClaveInput(user.clave || 'Sena2026*');
-    setErrorMessage(null);
   };
 
   return (
@@ -103,10 +104,10 @@ export const LoginView: React.FC<LoginViewProps> = ({
               </div>
               <div>
                 <div className="text-xs font-black tracking-widest text-[#0D631B] uppercase">
-                  SENA • Regional Cesar
+                  Gestión Académica
                 </div>
                 <h1 className="text-sm font-bold text-slate-900 leading-tight">
-                  Centro Biotecnológico del Caribe
+                  Sistema de Gestión Académica y Curricular
                 </h1>
               </div>
             </div>
@@ -147,7 +148,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     type="email"
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="usuario@misena.edu.co"
+                    placeholder="usuario@correo.com"
                     required
                     className="w-full pl-10 pr-3 py-2.5 text-xs bg-slate-50 hover:bg-slate-100/80 focus:bg-white border border-slate-200 focus:border-[#0D631B] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0D631B]/15 transition-all text-slate-900 font-medium placeholder:text-slate-400"
                   />
@@ -199,7 +200,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     Mantener sesión iniciada
                   </span>
                 </label>
-                <span className="text-[11px] text-slate-400 font-mono">CBC v4.2</span>
+                <span className="text-[11px] text-slate-400 font-mono">v1.0</span>
               </div>
 
               {/* Botón de Enviar */}
@@ -222,50 +223,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 )}
               </button>
             </form>
-
-            {/* Guía de Credenciales para Pruebas (Discreta y Rápida) */}
-            <div className="mt-5 pt-4 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setMostrarGuiaPruebas(!mostrarGuiaPruebas)}
-                className="w-full flex items-center justify-between text-[11px] font-bold text-emerald-800 hover:text-emerald-900 bg-emerald-50/60 hover:bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-200/60 transition-colors"
-              >
-                <span className="flex items-center space-x-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-[#0D631B]" />
-                  <span>Credenciales para pruebas de roles</span>
-                </span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${mostrarGuiaPruebas ? 'rotate-180' : ''}`} />
-              </button>
-
-              {mostrarGuiaPruebas && (
-                <div className="mt-2 space-y-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200/80 text-[11px] animate-in fade-in duration-150">
-                  <div className="text-[10px] text-slate-500 px-1 font-medium">
-                    Haz clic en un rol para cargar automáticamente sus credenciales y probar su vista:
-                  </div>
-                  {usuariosDisponibles.map((u) => (
-                    <button
-                      key={u.id}
-                      type="button"
-                      onClick={() => handleSeleccionarRolPrueba(u)}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg bg-white hover:bg-emerald-50 border border-slate-200/80 hover:border-emerald-300 flex items-center justify-between transition-colors"
-                    >
-                      <div className="min-w-0 pr-2">
-                        <span className="font-bold text-slate-800">
-                          {u.rol === 'COORDINADOR' && '📋 Coordinador: '}
-                          {u.rol === 'INSTRUCTOR_LIDER' && '👨‍🏫 Instructor: '}
-                          {u.rol === 'AUXILIAR' && '⚡ Auxiliar: '}
-                          {u.rol === 'ADMINISTRADOR' && '👑 Administrador: '}
-                        </span>
-                        <span className="text-slate-600 font-mono text-[10px] truncate">{u.correo}</span>
-                      </div>
-                      <span className="text-[9px] font-mono text-emerald-700 font-bold bg-emerald-100/60 px-1.5 py-0.5 rounded">
-                        Llenar
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Pie de Página */}
@@ -274,50 +231,20 @@ export const LoginView: React.FC<LoginViewProps> = ({
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
               <span>Autenticación RBAC</span>
             </span>
-            <span>Centro Biotecnológico del Caribe</span>
+            <button
+              type="button"
+              onClick={() => setMostrarAcercaDe(true)}
+              className="hover:text-slate-500 transition-colors cursor-default"
+              title=" "
+            >
+              v1.0
+            </button>
           </div>
         </div>
 
-        {/* Tarjeta Destacada de Descarga para GitHub */}
-        <div className="mt-4 bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 text-white shadow-xl flex items-center justify-between gap-3">
-          <div className="flex items-center space-x-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center shrink-0">
-              <Github className="w-5 h-5 text-emerald-300" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-xs font-bold text-white flex items-center space-x-1.5">
-                <span>Versión Descargable GitHub</span>
-                <span className="px-1.5 py-0.2 rounded bg-emerald-400 text-slate-950 text-[9px] font-black uppercase">ZIP</span>
-              </div>
-              <div className="text-[11px] text-slate-200 truncate">
-                HTML, CSS, JS + README con usuarios semilla
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-2 shrink-0">
-            <a
-              href="/standalone/index.html"
-              target="_blank"
-              rel="noreferrer"
-              className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 flex items-center space-x-1 transition-colors"
-              title="Abrir versión autónoma en nueva pestaña"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Ver</span>
-            </a>
-
-            <a
-              href="/sena-cbc-standalone.zip"
-              download="sena-cbc-gestion-academica-standalone.zip"
-              className="py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black flex items-center space-x-1.5 shadow-md transition-all hover:scale-105"
-              title="Descargar archivo ZIP con todo el código"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Descargar ZIP</span>
-            </a>
-          </div>
-        </div>
+        {mostrarAcercaDe && (
+          <AcercaDeModal onClose={() => setMostrarAcercaDe(false)} />
+        )}
       </div>
     </div>
   );

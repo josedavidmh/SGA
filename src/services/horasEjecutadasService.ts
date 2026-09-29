@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
-import { Competencia, ActividadSeguimiento, RegistroHorasEjecutadas, TipoCompetencia, RapSeguimiento } from '../types';
+import { Competencia, ActividadSeguimiento, RegistroHorasEjecutadas, TipoCompetencia, RapSeguimiento, TotalesHorasSofia } from '../types';
+import { generarUuid } from '../lib/id';
 
 export interface ComparativoCompetenciaItem {
   competenciaCodigo: string;
@@ -18,6 +19,8 @@ export interface ComparativoCompetenciaItem {
 export interface ResultadoProcesamientoHorasEjecutadas {
   registros: RegistroHorasEjecutadas[];
   totalHorasEjecutadas: number;
+  /** Totales del encabezado del reporte SofiaPlus (horas programadas / ejecutadas / pendientes de la ficha). */
+  totalesSofia?: TotalesHorasSofia;
   instructoresCount: number;
   competenciasCount: number;
   fichasReportadas: string[];
@@ -37,9 +40,8 @@ export interface ResultadoProcesamientoHorasEjecutadas {
  */
 export function descargarPlantillaHorasEjecutadasExcel(): void {
   const wsData = [
-    ['SERVICIO NACIONAL DE APRENDIZAJE - SENA'],
     ['FORMATO DE REPORTE DE HORAS EJECUTADAS POR INSTRUCTOR Y COMPETENCIA'],
-    ['SISTEMA INTEGRADO DE GESTIÓN ACADÉMICA - CBC VALLEDUPAR'],
+    ['SISTEMA INTEGRADO DE GESTIÓN ACADÉMICA'],
     [],
     [
       'DOCUMENTO_INSTRUCTOR',
@@ -109,7 +111,7 @@ export function descargarPlantillaHorasEjecutadasExcel(): void {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Horas_Ejecutadas');
 
-  XLSX.writeFile(wb, 'Plantilla_SENA_Horas_Ejecutadas_Instructor.xlsx');
+  XLSX.writeFile(wb, 'Plantilla_Horas_Ejecutadas_Instructor.xlsx');
 }
 
 /**
@@ -167,8 +169,27 @@ export async function parseHorasEjecutadasExcel(file: File): Promise<ResultadoPr
           if (fichaNumeroDetectada) break;
         }
 
+        // Totales del encabezado SofiaPlus: "Total de horas programadas /
+        // ejecutadas / pendientes". Es el ÚNICO lugar del reporte donde vienen
+        // las horas EJECUTADAS; por competencia el archivo solo trae las
+        // programadas.
+        const totalesSofia: TotalesHorasSofia = { programadas: 0, ejecutadas: 0, pendientes: 0 };
+        let hayTotales = false;
+        for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
+          const row = rawRows[i] || [];
+          const etiqueta = String(row[0] || '').trim().toLowerCase();
+          const valor = parseFloat(String(row[1] ?? '').replace(',', '.'));
+          if (!etiqueta.startsWith('total de horas') || isNaN(valor)) continue;
+          hayTotales = true;
+          if (etiqueta.includes('programad')) totalesSofia.programadas = valor;
+          else if (etiqueta.includes('ejecutad')) totalesSofia.ejecutadas = valor;
+          else if (etiqueta.includes('pendiente')) totalesSofia.pendientes = valor;
+        }
+
         // Escanear fila de encabezados
         let headerRowIdx = -1;
+        let colFechaFin = -1;
+        let colEstadoInst = -1;
         let colDoc = -1;
         let colNombre = -1;
         let colApellido = -1;
@@ -197,10 +218,13 @@ export async function parseHorasEjecutadasExcel(file: File): Promise<ResultadoPr
               if (colApellido === -1 && cell.includes('apellido')) {
                 colApellido = idx;
               }
+              if (colEstadoInst === -1 && cell.startsWith('estado')) {
+                colEstadoInst = idx;
+              }
             });
 
             row.forEach((cell, idx) => {
-              if (idx === colApellido) return;
+              if (idx === colApellido || idx === colEstadoInst) return;
               if (colDoc === -1 && (cell.includes('documento') || cell.includes('cédula') || cell.includes('cedula') || cell.includes('dni') || cell.includes('identificacion') || cell.includes('identificación'))) {
                 colDoc = idx;
               } else if (colNombre === -1 && (cell.includes('nombre') || cell.includes('instructor') || cell.includes('docente'))) {
@@ -213,6 +237,8 @@ export async function parseHorasEjecutadasExcel(file: File): Promise<ResultadoPr
                 colFicha = idx;
               } else if (colHoras === -1 && (cell.includes('ejecutad') || cell.includes('hora') || cell.includes('duración') || cell.includes('duracion'))) {
                 colHoras = idx;
+              } else if (colFechaFin === -1 && cell.includes('fecha') && cell.includes('fin')) {
+                colFechaFin = idx;
               } else if (colPeriodo === -1 && (cell.includes('periodo') || cell.includes('mes') || cell.includes('fecha') || cell.includes('trimestre'))) {
                 colPeriodo = idx;
               } else if (colObs === -1 && (cell.includes('obs') || cell.includes('detalle') || cell.includes('nota') || cell.includes('comentario'))) {
@@ -303,8 +329,15 @@ export async function parseHorasEjecutadasExcel(file: File): Promise<ResultadoPr
 
           const instructorNom = rawNombre || (rawDoc ? `Doc: ${rawDoc}` : 'Instructor Asignado');
 
+          const rawFechaFin = colFechaFin !== -1 ? String(row[colFechaFin] || '').trim() : '';
           const reg: RegistroHorasEjecutadas = {
-            id: `reg_horas_${Date.now()}_${i}`,
+            id: generarUuid(),
+            instructorNombres: rawNombreCol || undefined,
+            instructorApellidos: rawApellido || undefined,
+            instructorEstado: colEstadoInst !== -1 ? String(row[colEstadoInst] || '').trim() || undefined : undefined,
+            horasProgramadas: horasNum,
+            fechaInicio: /\d{1,2}\/\d{1,2}\/\d{4}/.test(rawPeriodo) ? rawPeriodo : undefined,
+            fechaFin: rawFechaFin || undefined,
             instructorDocumento: rawDoc,
             instructorNombre: instructorNom,
             competenciaCodigo: compCod,
@@ -330,6 +363,7 @@ export async function parseHorasEjecutadasExcel(file: File): Promise<ResultadoPr
         resolve({
           registros,
           totalHorasEjecutadas: Math.round(totalHoras * 10) / 10,
+          totalesSofia: hayTotales ? totalesSofia : undefined,
           instructoresCount: instructoresSet.size,
           competenciasCount: competenciasSet.size,
           fichasReportadas: Array.from(fichasSet),
@@ -422,7 +456,7 @@ export function calcularComparativoCompetencias(
       horasDirecto = comp.horasTrabajoDirecto;
       horasAutonomo = comp.horasTrabajoAutonomo;
     } else {
-      // Estándar curricular SENA: 80% directo, 20% autónomo sobre horas estimadas
+      // Estándar curricular: 80% directo, 20% autónomo sobre horas estimadas
       const totalEstimadas = comp.horasEstimadas || 96;
       horasDirecto = Math.round(totalEstimadas * 0.8);
       horasAutonomo = Math.round(totalEstimadas * 0.2);
@@ -435,7 +469,7 @@ export function calcularComparativoCompetencias(
     // horas YA FILTRADOS POR FICHA que llegan en registrosHoras — de lo
     // contrario, dos fichas del mismo programa contaminan sus horas
     // ejecutadas entre sí.
-    const horasEjecutadas = execData.totalHoras;
+    const horasEjecutadas = Math.round(execData.totalHoras * 10) / 10;
 
     const porcentajeEjecucion = horasTotalesPlaneadas > 0 
       ? Math.round((horasEjecutadas / horasTotalesPlaneadas) * 100) 

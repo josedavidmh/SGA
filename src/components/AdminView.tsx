@@ -26,6 +26,8 @@ interface AdminProps {
   onLimpiarDatabase: () => void;
   onCrearUsuario?: (usuario: User) => void;
   onEliminarUsuario?: (usuarioId: string) => void;
+  onEditarClaveUsuario?: (usuarioId: string, nuevaClave: string) => void;
+  onEditarCorreoUsuario?: (usuarioId: string, nuevoCorreo: string) => { exito: boolean; mensaje: string };
 }
 
 export const AdminView: React.FC<AdminProps> = ({
@@ -36,16 +38,21 @@ export const AdminView: React.FC<AdminProps> = ({
   onSeedDatabase,
   onLimpiarDatabase,
   onCrearUsuario,
-  onEliminarUsuario
+  onEliminarUsuario,
+  onEditarClaveUsuario,
+  onEditarCorreoUsuario
 }) => {
   const [filterModulo, setFilterModulo] = React.useState<string>('TODOS');
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = React.useState<boolean>(false);
   const [isModalUsuarioOpen, setIsModalUsuarioOpen] = React.useState<boolean>(false);
+  const [usuarioEditandoClave, setUsuarioEditandoClave] = React.useState<User | null>(null);
+  const [claveEditada, setClaveEditada] = React.useState('');
+  const [correoEditado, setCorreoEditado] = React.useState('');
 
   // Campos para crear usuario
   const [nuevoNombre, setNuevoNombre] = React.useState('');
   const [nuevoCorreo, setNuevoCorreo] = React.useState('');
-  const [nuevaClave, setNuevaClave] = React.useState('Sena2026*');
+  const [nuevaClave, setNuevaClave] = React.useState('Sistema2026*');
   const [nuevoRol, setNuevoRol] = React.useState<UserRole>('INSTRUCTOR_LIDER');
   const [nuevoCargo, setNuevoCargo] = React.useState('Instructor de Formación Titulada');
 
@@ -203,19 +210,34 @@ export const AdminView: React.FC<AdminProps> = ({
                     </div>
                   </div>
 
-                  {!isRootAdmin && !isCurrent && onEliminarUsuario && (
-                    <button
-                      onClick={() => onEliminarUsuario(u.id)}
-                      className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-600 p-1 rounded-md hover:bg-red-50 transition-all"
-                      title="Eliminar usuario"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                  <div className="opacity-0 group-hover:opacity-100 flex items-center space-x-1 transition-all shrink-0">
+                    {(onEditarClaveUsuario || onEditarCorreoUsuario) && (
+                      <button
+                        onClick={() => {
+                          setUsuarioEditandoClave(u);
+                          setClaveEditada('');
+                          setCorreoEditado(u.correo);
+                        }}
+                        className="text-slate-400 hover:text-[#0D631B] p-1 rounded-md hover:bg-emerald-50"
+                        title="Editar correo y/o clave de acceso"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {!isRootAdmin && !isCurrent && onEliminarUsuario && (
+                      <button
+                        onClick={() => onEliminarUsuario(u.id)}
+                        className="text-slate-400 hover:text-red-600 p-1 rounded-md hover:bg-red-50"
+                        title="Eliminar usuario"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="text-[11px] text-slate-600 truncate font-medium">
-                  {u.cargo || 'Funcionario SENA'}
+                  {u.cargo || 'Funcionario del Sistema'}
                 </div>
 
                 <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
@@ -227,7 +249,7 @@ export const AdminView: React.FC<AdminProps> = ({
                     {u.rol}
                   </span>
                   <span className="text-[10px] text-slate-400 font-mono">
-                    {u.clave ? 'Clave asignada' : 'Sena2026*'}
+                    {u.clave ? 'Clave asignada' : 'Sistema2026*'}
                   </span>
                 </div>
               </div>
@@ -265,17 +287,17 @@ export const AdminView: React.FC<AdminProps> = ({
                 const nuevoUser: User = {
                   id: `usr_${Date.now()}`,
                   correo: nuevoCorreo.trim().toLowerCase(),
-                  clave: nuevaClave.trim() || 'Sena2026*',
+                  clave: nuevaClave.trim() || 'Sistema2026*',
                   nombre_completo: nuevoNombre.trim(),
                   rol: nuevoRol,
-                  cargo: nuevoCargo.trim() || 'Funcionario SENA',
+                  cargo: nuevoCargo.trim() || 'Funcionario del Sistema',
                   avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(nuevoNombre.trim())}&background=0D631B&color=fff`
                 };
                 onCrearUsuario?.(nuevoUser);
                 setIsModalUsuarioOpen(false);
                 setNuevoNombre('');
                 setNuevoCorreo('');
-                setNuevaClave('Sena2026*');
+                setNuevaClave('Sistema2026*');
               }}
               className="mt-4 space-y-3.5 text-xs"
             >
@@ -298,7 +320,7 @@ export const AdminView: React.FC<AdminProps> = ({
                   required
                   value={nuevoCorreo}
                   onChange={(e) => setNuevoCorreo(e.target.value)}
-                  placeholder="usuario@misena.edu.co"
+                  placeholder="usuario@correo.edu.co"
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-[#0D631B] outline-none"
                 />
               </div>
@@ -325,7 +347,7 @@ export const AdminView: React.FC<AdminProps> = ({
                     required
                     value={nuevaClave}
                     onChange={(e) => setNuevaClave(e.target.value)}
-                    placeholder="Sena2026*"
+                    placeholder="Sistema2026*"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-[#0D631B] outline-none font-mono"
                   />
                 </div>
@@ -355,6 +377,115 @@ export const AdminView: React.FC<AdminProps> = ({
                   className="px-4 py-2 bg-[#0D631B] hover:bg-[#0a4d15] text-white rounded-xl font-bold shadow-xs"
                 >
                   Crear Usuario
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Editar Correo y/o Clave de Acceso de Cualquier Usuario (Administrador).
+          El correo es editable aquí porque es la causa más común de "no me deja entrar con
+          el correo que le registré": el correo con el que se creó la cuenta no coincide
+          exactamente (typo, dominio distinto) con el que la persona usa para iniciar sesión. */}
+      {usuarioEditandoClave && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 text-[#0D631B] flex items-center justify-center">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <h3 className="font-bold text-sm text-slate-900">Editar Acceso de Usuario</h3>
+              </div>
+              <button
+                onClick={() => setUsuarioEditandoClave(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const correoNuevo = correoEditado.trim().toLowerCase();
+                const correoActual = usuarioEditandoClave.correo.toLowerCase();
+
+                if (!correoNuevo || !correoNuevo.includes('@')) {
+                  alert('Ingrese un correo electrónico válido.');
+                  return;
+                }
+                if (!claveEditada.trim() && correoNuevo === correoActual) {
+                  alert('No hay cambios: ingrese una nueva clave o modifique el correo.');
+                  return;
+                }
+
+                if (correoNuevo !== correoActual && onEditarCorreoUsuario) {
+                  const resultado = onEditarCorreoUsuario(usuarioEditandoClave.id, correoNuevo);
+                  if (!resultado.exito) {
+                    alert(resultado.mensaje);
+                    return;
+                  }
+                }
+                if (claveEditada.trim()) {
+                  onEditarClaveUsuario?.(usuarioEditandoClave.id, claveEditada.trim());
+                }
+                setUsuarioEditandoClave(null);
+                setClaveEditada('');
+                setCorreoEditado('');
+              }}
+              className="mt-4 space-y-3.5 text-xs"
+            >
+              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                <div className="font-bold text-slate-800 truncate">{usuarioEditandoClave.nombre_completo}</div>
+              </div>
+
+              {onEditarCorreoUsuario && (
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Correo Electrónico de Acceso:</label>
+                  <input
+                    type="email"
+                    required
+                    autoFocus
+                    value={correoEditado}
+                    onChange={(e) => setCorreoEditado(e.target.value)}
+                    placeholder="usuario@correo.edu.co"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-[#0D631B] outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Debe coincidir exactamente con el correo que la persona usará para iniciar sesión.
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">
+                  Nueva Clave de Acceso {onEditarCorreoUsuario ? '(opcional)' : ''}:
+                </label>
+                <input
+                  type="text"
+                  required={!onEditarCorreoUsuario}
+                  value={claveEditada}
+                  onChange={(e) => setClaveEditada(e.target.value)}
+                  placeholder="Ej: Sistema2026* (dejar en blanco para no cambiarla)"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-[#0D631B] outline-none font-mono"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setUsuarioEditandoClave(null)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-[#0D631B] hover:bg-[#0a4d15] text-white rounded-xl font-bold shadow-xs"
+                >
+                  Guardar Cambios
                 </button>
               </div>
             </form>

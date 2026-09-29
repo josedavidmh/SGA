@@ -38,7 +38,7 @@ export function exportarHorarioFichaExcel(ficha: Ficha, bloques: BloqueHorario[]
   const totalHoras = bloques.reduce((acc, b) => acc + b.duracionHoras, 0);
 
   const wsGridData: (string | number)[][] = [
-    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR SENA - HORARIO DE FICHA'],
+    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR - HORARIO DE FICHA'],
     [`FICHA: ${ficha.numero_ficha} - ${ficha.programaNombre}`],
     [`AMBIENTE: ${ficha.ambientePrincipal} | PERIODO: ${ficha.periodoLectivo}`],
     [`TOTAL BLOQUES: ${bloques.length} | TOTAL HORAS SEMANALES: ${totalHoras}h`],
@@ -48,7 +48,10 @@ export function exportarHorarioFichaExcel(ficha: Ficha, bloques: BloqueHorario[]
       `${f.label} (${f.sub})`,
       ...dias.map(d => {
         const b = encontrarBloque(bloques, d, f.franja);
-        return b ? `${b.competenciaNombre || b.rapTitulo} | ${b.instructorNombre || 'VACANTE — falta instructor'} (${b.duracionHoras}h) | ${b.ambiente}` : '';
+        // El ambiente siempre es el de la ficha (Espacio Físico / Sede), nunca
+        // el que haya quedado guardado en el bloque — se muestran así aunque
+        // el bloque sea de antes de un cambio de ambiente en la ficha.
+        return b ? `${b.competenciaNombre || b.rapTitulo} | ${b.instructorNombre || 'VACANTE — falta instructor'} (${b.duracionHoras}h) | ${ficha.ambientePrincipal}` : '';
       })
     ])
   ];
@@ -59,7 +62,7 @@ export function exportarHorarioFichaExcel(ficha: Ficha, bloques: BloqueHorario[]
   const wsDetalleData = [
     ['DÍA', 'FRANJA HORARIA', 'AMBIENTE', 'INSTRUCTOR ASIGNADO', 'CÓDIGO RAP', 'ACTIVIDAD / MÓDULO', 'HORAS'],
     ...bloques.map(b => [
-      b.diaSemana, b.franja, b.ambiente, b.instructorNombre || 'VACANTE — falta instructor', b.rapCodigo, b.competenciaNombre || b.rapTitulo, b.duracionHoras
+      b.diaSemana, b.franja, ficha.ambientePrincipal, b.instructorNombre || 'VACANTE — falta instructor', b.rapCodigo, b.competenciaNombre || b.rapTitulo, b.duracionHoras
     ])
   ];
   const wsDetalle = XLSX.utils.aoa_to_sheet(wsDetalleData);
@@ -77,7 +80,7 @@ export function exportarHorarioFichaPDF(ficha: Ficha, bloques: BloqueHorario[], 
 
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR SENA', 40, 36);
+  doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR', 40, 36);
   doc.setFontSize(11);
   doc.text(`Horario de la Ficha ${ficha.numero_ficha}`, 40, 54);
   doc.setFont('helvetica', 'normal');
@@ -146,7 +149,7 @@ export function exportarHorariosPorInstructorExcel(bloques: BloqueHorario[], dia
   const grupos = agruparPorInstructor(bloques);
 
   const wsData: (string | number)[][] = [
-    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR SENA - HORARIOS POR INSTRUCTOR'],
+    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR - HORARIOS POR INSTRUCTOR'],
     ['Todas las fichas y programas de formación'],
     [`INSTRUCTORES CON BLOQUES ASIGNADOS: ${grupos.length}`],
     []
@@ -166,7 +169,8 @@ export function exportarHorariosPorInstructorExcel(bloques: BloqueHorario[], dia
         `${f.label} (${f.sub})`,
         ...dias.map(d => {
           const b = g.bloques.find(x => x.diaSemana === d && x.franja === f.franja);
-          return b ? `${etiquetaFicha(fichasPorId, b.fichaId)} | ${b.competenciaNombre || b.rapTitulo} (${b.duracionHoras}h) | ${b.ambiente}` : '';
+          const ambienteFicha = fichasPorId[b?.fichaId || '']?.ambientePrincipal || b?.ambiente || '';
+          return b ? `${etiquetaFicha(fichasPorId, b.fichaId)} | ${b.competenciaNombre || b.rapTitulo} (${b.duracionHoras}h) | ${ambienteFicha}` : '';
         })
       ]);
     });
@@ -188,7 +192,7 @@ export function exportarHorariosPorInstructorPDF(bloques: BloqueHorario[], dias:
   if (grupos.length === 0) {
     doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
-    doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR SENA', 40, 36);
+    doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR', 40, 36);
     doc.setFontSize(11);
     doc.text('Horarios por Instructor — Todas las Fichas', 40, 54);
     doc.setFont('helvetica', 'normal');
@@ -205,7 +209,7 @@ export function exportarHorariosPorInstructorPDF(bloques: BloqueHorario[], dias:
 
     doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
-    doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR SENA', 40, 36);
+    doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR', 40, 36);
     doc.setFontSize(11);
     doc.text(`Horario Asignado — ${g.instructorNombre}`, 40, 54);
     doc.setFont('helvetica', 'normal');
@@ -219,7 +223,8 @@ export function exportarHorariosPorInstructorPDF(bloques: BloqueHorario[], dias:
         `${f.label}\n${f.sub}`,
         ...dias.map(d => {
           const b = g.bloques.find(x => x.diaSemana === d && x.franja === f.franja);
-          return b ? `${etiquetaFicha(fichasPorId, b.fichaId)}\n${b.competenciaNombre || b.rapTitulo}\n${b.ambiente} (${b.duracionHoras}h)` : 'Libre';
+          const ambienteFicha = fichasPorId[b?.fichaId || '']?.ambientePrincipal || b?.ambiente || '';
+          return b ? `${etiquetaFicha(fichasPorId, b.fichaId)}\n${b.competenciaNombre || b.rapTitulo}\n${ambienteFicha} (${b.duracionHoras}h)` : 'Libre';
         })
       ]),
       styles: { fontSize: 7, cellPadding: 4, valign: 'top' },

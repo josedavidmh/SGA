@@ -53,7 +53,7 @@ export function exportarResultadosSeguimientoExcel(ficha: Ficha, filas: FilaResu
   const resumen = resumenConteo(filas);
 
   const wsData = [
-    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR SENA - RESULTADOS DE SEGUIMIENTO'],
+    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR - RESULTADOS DE SEGUIMIENTO'],
     [`FICHA: ${ficha.numero_ficha} - ${ficha.programaNombre}`],
     [`CORTE: ${new Date().toLocaleDateString('es-CO')}`],
     [`RAPs: ${resumen.total} totales | ${resumen.pendientes} pendientes | ${resumen.enEjecucion} en ejecución | ${resumen.calificados} calificados | ${resumen.sinCalificar} sin calificar`],
@@ -96,7 +96,7 @@ export function exportarResultadosSeguimientoPDF(ficha: Ficha, filas: FilaResult
 
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR SENA', 40, 36);
+  doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR', 40, 36);
   doc.setFontSize(11);
   doc.text('Resultados de Seguimiento — Competencias y RAPs', 40, 54);
 

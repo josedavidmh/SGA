@@ -127,7 +127,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Breadcrumbs jerárquicos adaptables */}
         <div className="flex items-center space-x-1.5 text-xs text-slate-500 font-medium overflow-x-auto whitespace-nowrap scrollbar-none py-0.5">
-          <span className="font-bold text-[#0D631B] cursor-pointer hover:underline shrink-0">SENA CBC</span>
+          <span className="font-bold text-[#0D631B] cursor-pointer hover:underline shrink-0">Inicio</span>
           <span className="text-slate-400">›</span>
           {breadcrumbs.map((crumb, idx) => (
             <React.Fragment key={idx}>

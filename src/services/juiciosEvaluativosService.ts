@@ -87,6 +87,30 @@ function limpiarTextoEncoding(texto: string): string {
 }
 
 /**
+ * Convierte un número serial de fecha de Excel a "dd/mm/aaaa hh:mm".
+ */
+function serialExcelAFecha(serial: number): string {
+  const ms = Math.round((serial - 25569) * 86400 * 1000); // 25569 = días entre 1899-12-30 y 1970-01-01
+  const d = new Date(ms);
+  const dos = (n: number) => String(n).padStart(2, '0');
+  return `${dos(d.getUTCDate())}/${dos(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${dos(d.getUTCHours())}:${dos(d.getUTCMinutes())}`;
+}
+
+/**
+ * Normaliza un encabezado/etiqueta para compararlo sin depender de tildes
+ * ni de los caracteres dañados que deja el encoding de SofiaPlus.
+ */
+function normalizarEncabezado(texto: string): string {
+  return (texto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\uFFFD/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Lee un archivo File de navegador o string y procesa el reporte de SofiaPlus
  */
 export async function procesarJuiciosEvaluativosExcel(
@@ -95,60 +119,83 @@ export async function procesarJuiciosEvaluativosExcel(
 ): Promise<ResultadoProcesamientoJuicios> {
   const advertencias: string[] = [];
 
+  const fallo = (mensaje: string, extra: Partial<ResultadoProcesamientoJuicios['detalles']> = {}, avisos: string[] = []): ResultadoProcesamientoJuicios => ({
+    exito: false,
+    mensaje,
+    detalles: {
+      fichaNumero: '',
+      programaCodigo: '',
+      programaNombre: '',
+      totalAprendices: 0,
+      aprendicesActivos: 0,
+      aprendicesRetiroVoluntario: 0,
+      aprendicesCancelados: 0,
+      tasaRetencion: 0,
+      tasaDesercion: 0,
+      totalRegistrosJuicios: 0,
+      juiciosAprobados: 0,
+      juiciosPorEvaluar: 0,
+      porcentajeAprobacion: 0,
+      competenciasCount: 0,
+      advertencias: avisos.length > 0 ? avisos : [mensaje],
+      ...extra
+    }
+  });
+
   try {
-    let lineasTexto: string[] = [];
+    // Todo el archivo se lleva a una matriz filas × celdas. Antes, un .xls
+    // binario se convertía a texto CSV y se partía por saltos de línea — pero
+    // las celdas de SofiaPlus (competencias, RAPs) traen saltos de línea
+    // DENTRO del texto, así que una sola fila se partía en varias y las
+    // columnas quedaban corridas: el "documento" terminaba siendo un pedazo
+    // de texto distinto en cada línea (miles de "aprendices" falsos).
+    let filas: string[][] = [];
+    const textoAFilas = (t: string) => t.split(/\r?\n/).map(l => l.split(';').map(c => c.trim()));
 
     if (typeof archivo === 'string') {
-      lineasTexto = archivo.split(/\r?\n/);
+      filas = textoAFilas(archivo);
     } else {
-      // Puede ser un archivo .xls binario o un archivo de texto delimitado por punto y coma con extensión .xls
+      // Puede ser un .xls binario o un texto delimitado por punto y coma con extensión .xls
       const arrayBuffer = await archivo.arrayBuffer();
-      
-      // Intentar primero leer como texto UTF-8 o Latin-1
-      const decoder = new TextDecoder('utf-8');
-      const textoUtf8 = decoder.decode(arrayBuffer);
+      // Un .xls binario (firma D0 CF 11 E0) o un .xlsx (firma PK) SIEMPRE se
+      // abre con SheetJS. Antes se intentaba primero como texto, y como el
+      // binario de Excel guarda los textos en claro ("Reporte de Juicios..."),
+      // se confundía con un CSV: las filas salían revueltas, la ficha se
+      // tomaba del código del programa (228118) y los aprendices se
+      // multiplicaban por miles.
+      const bytes = new Uint8Array(arrayBuffer.slice(0, 4));
+      const esBinarioExcel =
+        (bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0) ||
+        (bytes[0] === 0x50 && bytes[1] === 0x4b);
+      const textoUtf8 = esBinarioExcel ? '' : new TextDecoder('utf-8').decode(arrayBuffer);
+      const esTextoSofia = (t: string) => t.includes('Reporte de Juicios') || t.includes('Juicio de Evaluaci') || t.includes('Tipo de Documento;');
 
-      if (textoUtf8.includes('Reporte de Juicios') || textoUtf8.includes('Juicio de Evaluaci') || textoUtf8.includes('Tipo de Documento;')) {
-        lineasTexto = textoUtf8.split(/\r?\n/);
+      if (esBinarioExcel) {
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const matriz = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, raw: false, defval: '' });
+        filas = matriz.map(fila =>
+          (Array.isArray(fila) ? fila : []).map(c => String(c ?? '').replace(/\s*[\r\n]+\s*/g, ' ').trim())
+        );
+      } else if (esTextoSofia(textoUtf8)) {
+        filas = textoAFilas(textoUtf8);
       } else {
-        // Intentar decodificar como ISO-8859-1
-        const latinDecoder = new TextDecoder('iso-8859-1');
-        const textoLatin = latinDecoder.decode(arrayBuffer);
-        if (textoLatin.includes('Reporte de Juicios') || textoLatin.includes('Juicio de Evaluaci') || textoLatin.includes('Tipo de Documento;')) {
-          lineasTexto = textoLatin.split(/\r?\n/);
+        const textoLatin = new TextDecoder('iso-8859-1').decode(arrayBuffer);
+        if (esTextoSofia(textoLatin)) {
+          filas = textoAFilas(textoLatin);
         } else {
-          // Intentar abrir con SheetJS
           const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          const csvContent = XLSX.utils.sheet_to_csv(worksheet, { FS: ';' });
-          lineasTexto = csvContent.split(/\r?\n/);
+          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+          const matriz = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, raw: false, defval: '' });
+          filas = matriz.map(fila =>
+            (Array.isArray(fila) ? fila : []).map(c => String(c ?? '').replace(/\s*[\r\n]+\s*/g, ' ').trim())
+          );
         }
       }
     }
 
-    if (lineasTexto.length < 5) {
-      return {
-        exito: false,
-        mensaje: 'El archivo está vacío o no contiene suficientes líneas de reporte de SofiaPlus.',
-        detalles: {
-          fichaNumero: '',
-          programaCodigo: '',
-          programaNombre: '',
-          totalAprendices: 0,
-          aprendicesActivos: 0,
-          aprendicesRetiroVoluntario: 0,
-          aprendicesCancelados: 0,
-          tasaRetencion: 0,
-          tasaDesercion: 0,
-          totalRegistrosJuicios: 0,
-          juiciosAprobados: 0,
-          juiciosPorEvaluar: 0,
-          porcentajeAprobacion: 0,
-          competenciasCount: 0,
-          advertencias: ['El archivo no tiene el formato esperado.']
-        }
-      };
+    if (filas.filter(f => f.some(c => c !== '')).length < 5) {
+      return fallo('El archivo está vacío o no contiene suficientes líneas de reporte de SofiaPlus.', {}, ['El archivo no tiene el formato esperado.']);
     }
 
     // 1. Extraer Metadata de la cabecera
@@ -162,97 +209,97 @@ export async function procesarJuiciosEvaluativosExcel(
       fechaInicio: '',
       fechaFin: '',
       modalidad: 'PRESENCIAL',
-      regional: 'REGIONAL CESAR',
-      centroFormacion: 'CENTRO BIOTECNOLÓGICO DEL CARIBE'
+      regional: 'REGIONAL',
+      centroFormacion: 'CENTRO DE FORMACIÓN'
+    };
+
+    const esFilaEncabezadoTabla = (partes: string[]) => {
+      const n = partes.map(normalizarEncabezado);
+      return n.some(p => p.includes('doc')) &&
+        n.some(p => p.includes('juicio')) &&
+        n.some(p => p.includes('competencia') || p.includes('resultado'));
     };
 
     let tableHeaderIndex = -1;
 
-    for (let i = 0; i < Math.min(lineasTexto.length, 30); i++) {
-      const linea = lineasTexto[i];
-      const partes = linea.split(';').map(p => p.trim());
-
-      const primeraCol = partes[0]?.toLowerCase() || '';
-
-      if (primeraCol.includes('fecha del reporte')) {
-        metadata.fechaReporte = partes.find((p, idx) => idx > 0 && p.length > 3) || metadata.fechaReporte;
-      } else if (primeraCol.includes('ficha de caracterizaci')) {
-        metadata.fichaNumero = partes.find((p, idx) => idx > 0 && /\d{6,8}/.test(p)) || partes[2] || partes[1] || '';
-      } else if (primeraCol.includes('código') || primeraCol.includes('cgigo') || primeraCol.includes('codigo')) {
-        metadata.programaCodigo = partes.find((p, idx) => idx > 0 && /\d{5,8}/.test(p)) || partes[2] || partes[1] || '';
-      } else if (primeraCol.includes('versión') || primeraCol.includes('version')) {
-        metadata.version = partes.find((p, idx) => idx > 0 && p.length > 0) || '1';
-      } else if (primeraCol.includes('denominaci')) {
-        metadata.programaDenominacion = limpiarTextoEncoding(partes.find((p, idx) => idx > 0 && p.length > 3) || '');
-      } else if (primeraCol.includes('estado de la ficha')) {
-        metadata.estadoFicha = partes.find((p, idx) => idx > 0 && p.length > 2) || 'EN EJECUCION';
-      } else if (primeraCol.includes('fecha inicio')) {
-        metadata.fechaInicio = partes.find((p, idx) => idx > 0 && p.length > 4) || '';
-      } else if (primeraCol.includes('fecha fin')) {
-        metadata.fechaFin = partes.find((p, idx) => idx > 0 && p.length > 4) || '';
-      } else if (primeraCol.includes('modalidad')) {
-        metadata.modalidad = partes.find((p, idx) => idx > 0 && p.length > 3) || 'PRESENCIAL';
-      } else if (primeraCol.includes('regional')) {
-        metadata.regional = limpiarTextoEncoding(partes.find((p, idx) => idx > 0 && p.length > 2) || '');
-      } else if (primeraCol.includes('centro de formaci')) {
-        metadata.centroFormacion = limpiarTextoEncoding(partes.find((p, idx) => idx > 0 && p.length > 3) || '');
-      }
-
-      // Detectar la fila de encabezados de la tabla de aprendices
-      if (
-        partes.some(p => p.toLowerCase().includes('documento')) &&
-        partes.some(p => p.toLowerCase().includes('resultado de aprendizaje') || p.toLowerCase().includes('competencia'))
-      ) {
+    for (let i = 0; i < Math.min(filas.length, 60); i++) {
+      const partes = filas[i];
+      if (esFilaEncabezadoTabla(partes)) {
         tableHeaderIndex = i;
         break;
       }
+
+      // La etiqueta es la primera celda con texto (no siempre la columna A).
+      const idxEtiqueta = partes.findIndex(p => p !== '');
+      if (idxEtiqueta === -1) continue;
+      const etiqueta = normalizarEncabezado(partes[idxEtiqueta]);
+      const despues = partes.slice(idxEtiqueta + 1).filter(p => p !== '');
+      const valor = (min = 1) => despues.find(p => p.length >= min) || '';
+      const textoFila = normalizarEncabezado(partes.join(' '));
+
+      if (!metadata.fichaNumero && textoFila.includes('ficha')) {
+        // Sirve para "Ficha de Caracterización: | 3387711" (valor en otra
+        // celda) y para "Ficha de Caracterización: 3387711" (todo en una).
+        const m = textoFila.match(/ficha[^0-9]{0,80}?(\d{6,9})/);
+        if (m) metadata.fichaNumero = m[1];
+        continue;
+      }
+
+      if (etiqueta.includes('fecha del reporte')) {
+        metadata.fechaReporte = valor(4) || metadata.fechaReporte;
+      } else if (etiqueta.includes('codigo') || etiqueta.includes('cogigo') || etiqueta.includes('cdigo') || etiqueta.includes('cgigo')) {
+        metadata.programaCodigo = despues.find(p => /\d{5,8}/.test(p)) || valor() || '';
+      } else if (etiqueta.includes('version')) {
+        metadata.version = valor() || '1';
+      } else if (etiqueta.includes('denominaci')) {
+        metadata.programaDenominacion = limpiarTextoEncoding(valor(4));
+      } else if (etiqueta.includes('estado de la ficha')) {
+        metadata.estadoFicha = valor(3) || 'EN EJECUCION';
+      } else if (etiqueta.includes('fecha inicio')) {
+        metadata.fechaInicio = valor(5);
+      } else if (etiqueta.includes('fecha fin')) {
+        metadata.fechaFin = valor(5);
+      } else if (etiqueta.includes('modalidad')) {
+        metadata.modalidad = valor(4) || 'PRESENCIAL';
+      } else if (etiqueta.includes('regional')) {
+        metadata.regional = limpiarTextoEncoding(valor(3));
+      } else if (etiqueta.includes('centro de formaci')) {
+        metadata.centroFormacion = limpiarTextoEncoding(valor(4));
+      }
     }
 
     if (tableHeaderIndex === -1) {
-      // Intentar buscar "Tipo de Documento" en cualquier fila
-      tableHeaderIndex = lineasTexto.findIndex(l => 
-        l.toLowerCase().includes('tipo de documento') || 
-        (l.toLowerCase().includes('documento') && l.toLowerCase().includes('juicio'))
+      tableHeaderIndex = filas.findIndex(esFilaEncabezadoTabla);
+    }
+
+    if (tableHeaderIndex === -1) {
+      return fallo(
+        'No se encontró la cabecera de datos de aprendices y juicios evaluativos en el archivo.',
+        { fichaNumero: metadata.fichaNumero, programaCodigo: metadata.programaCodigo, programaNombre: metadata.programaDenominacion },
+        ['Falta la tabla de aprendices con columnas Tipo de Documento, Número de Documento, Competencia y Juicio de Evaluación.']
       );
     }
 
-    if (tableHeaderIndex === -1) {
-      return {
-        exito: false,
-        mensaje: 'No se encontró la cabecera de datos de aprendices y juicios evaluativos en el archivo.',
-        detalles: {
-          fichaNumero: metadata.fichaNumero,
-          programaCodigo: metadata.programaCodigo,
-          programaNombre: metadata.programaDenominacion,
-          totalAprendices: 0,
-          aprendicesActivos: 0,
-          aprendicesRetiroVoluntario: 0,
-          aprendicesCancelados: 0,
-          tasaRetencion: 0,
-          tasaDesercion: 0,
-          totalRegistrosJuicios: 0,
-          juiciosAprobados: 0,
-          juiciosPorEvaluar: 0,
-          porcentajeAprobacion: 0,
-          competenciasCount: 0,
-          advertencias: ['Falta la tabla de aprendices con columnas Tipo de Documento, Competencia y Juicio de Evaluación.']
-        }
-      };
-    }
+    // 2. Mapear Índices de Columnas (encabezados normalizados: sin tildes ni
+    // caracteres dañados por el encoding de SofiaPlus).
+    const headersOriginales = filas[tableHeaderIndex];
+    const headers = headersOriginales.map(normalizarEncabezado);
+    const buscar = (pred: (h: string) => boolean) => headers.findIndex(h => h !== '' && pred(h));
 
-    // 2. Mapear Índices de Columnas
-    const headers = lineasTexto[tableHeaderIndex].split(';').map(h => h.trim().toLowerCase());
-    
-    let colTipoDoc = headers.findIndex(h => h.includes('tipo de doc') || h === 'tipo documento');
-    let colNumDoc = headers.findIndex(h => h.includes('nmero de doc') || h.includes('numero de doc') || h.includes('número de doc') || h.includes('documento'));
-    let colNombre = headers.findIndex(h => h === 'nombre' || h.includes('nombres'));
-    let colApellidos = headers.findIndex(h => h.includes('apellido'));
-    let colEstado = headers.findIndex(h => h === 'estado' || h.includes('estado'));
-    let colComp = headers.findIndex(h => h.includes('competencia'));
-    let colRap = headers.findIndex(h => h.includes('resultado de aprendizaje') || h.includes('rap'));
-    let colJuicio = headers.findIndex(h => h.includes('juicio de evaluaci') || h.includes('juicio'));
-    let colFechaJuicio = headers.findIndex(h => h.includes('fecha y hora') || h.includes('fecha'));
-    let colFuncionario = headers.findIndex(h => h.includes('funcionario') || h.includes('instructor') || h.includes('registro el juicio'));
+    let colTipoDoc = buscar(h => h.includes('tipo') && h.includes('doc'));
+    // OJO: antes bastaba con que el encabezado dijera "documento", y "Tipo de
+    // Documento" (que va antes) también lo dice — se tomaba la columna
+    // equivocada. Ahora se excluye explícitamente la del tipo.
+    let colNumDoc = buscar(h => h.includes('doc') && !h.includes('tipo'));
+    let colNombre = buscar(h => h.startsWith('nombre') && !h.includes('apellido') && !h.includes('programa'));
+    let colApellidos = buscar(h => h.includes('apellido'));
+    let colEstado = buscar(h => h === 'estado' || (h.startsWith('estado') && !h.includes('ficha') && !h.includes('juicio')));
+    let colComp = buscar(h => h.includes('competencia'));
+    let colRap = buscar(h => h.includes('resultado') || h === 'rap' || h.startsWith('rap '));
+    let colJuicio = buscar(h => h.includes('juicio') && !h.includes('fecha') && !h.includes('funcionario') && !h.includes('registr'));
+    let colFechaJuicio = buscar(h => h.includes('fecha'));
+    let colFuncionario = buscar(h => h.includes('funcionario') || h.includes('instructor') || h.includes('registr'));
+    const colFicha = buscar(h => h.includes('ficha'));
 
     // Fallbacks posicionales estándar de SofiaPlus si los headers vinieron distorsionados
     if (colTipoDoc === -1) colTipoDoc = 0;
@@ -266,6 +313,35 @@ export async function procesarJuiciosEvaluativosExcel(
     if (colFechaJuicio === -1) colFechaJuicio = 9;
     if (colFuncionario === -1) colFuncionario = 10;
 
+    const esDocumentoValido = (v: string) => /^[A-Za-z0-9.\-]{4,20}$/.test(v) && /\d/.test(v);
+
+    // Si la tabla trae columna de ficha (reportes de varias fichas), se
+    // decide cuál ficha es y se descarta el resto.
+    if (colFicha >= 0) {
+      const fichasEnDatos = new Map<string, number>();
+      for (let r = tableHeaderIndex + 1; r < filas.length; r++) {
+        const f = (filas[r][colFicha] || '').match(/\d{6,9}/)?.[0];
+        if (f && esDocumentoValido(filas[r][colNumDoc] || '')) fichasEnDatos.set(f, (fichasEnDatos.get(f) || 0) + 1);
+      }
+      if (!metadata.fichaNumero) {
+        if (fichasEnDatos.size === 1) {
+          metadata.fichaNumero = Array.from(fichasEnDatos.keys())[0];
+        } else if (fichasEnDatos.size > 1) {
+          const lista = Array.from(fichasEnDatos.entries()).map(([f, n]) => `${f} (${n} juicios)`).join(', ');
+          return fallo(
+            `El archivo trae juicios de ${fichasEnDatos.size} fichas distintas: ${lista}. Descarga desde SofiaPlus el reporte de juicios de UNA sola ficha y vuelve a cargarlo.`
+          );
+        }
+      }
+    }
+
+    if (!metadata.fichaNumero) {
+      return fallo(
+        'No se encontró el número de ficha en el encabezado del archivo (la línea "Ficha de Caracterización"). Verifica que sea el Reporte de Juicios de Evaluación descargado de SofiaPlus para una ficha.',
+        { programaCodigo: metadata.programaCodigo, programaNombre: metadata.programaDenominacion }
+      );
+    }
+
     // 3. Procesar Filas de Aprendices y Juicios
     const aprendicesMap = new Map<string, AprendizJuicio>();
     const competenciasEvaluadasMap = new Map<string, { total: number; aprobados: number; porEvaluar: number }>();
@@ -273,16 +349,23 @@ export async function procesarJuiciosEvaluativosExcel(
     let totalFilasValidas = 0;
     let totalJuiciosAprobados = 0;
     let totalJuiciosPorEvaluar = 0;
+    let filasDescartadasOtraFicha = 0;
 
-    for (let r = tableHeaderIndex + 1; r < lineasTexto.length; r++) {
-      const rawLine = lineasTexto[r];
-      if (!rawLine || rawLine.trim() === '') continue;
+    for (let r = tableHeaderIndex + 1; r < filas.length; r++) {
+      const cols = filas[r];
+      if (!cols || cols.every(c => c === '')) continue;
 
-      const cols = rawLine.split(';').map(c => c.trim());
-      const numDoc = cols[colNumDoc];
-
-      if (!numDoc || numDoc.length < 4 || numDoc.toLowerCase().includes('documento')) {
+      const numDoc = cols[colNumDoc] || '';
+      if (!esDocumentoValido(numDoc)) {
         continue;
+      }
+
+      if (colFicha >= 0) {
+        const fichaFila = (cols[colFicha] || '').match(/\d{6,9}/)?.[0];
+        if (fichaFila && fichaFila !== metadata.fichaNumero) {
+          filasDescartadasOtraFicha++;
+          continue;
+        }
       }
 
       totalFilasValidas++;
@@ -305,7 +388,10 @@ export async function procesarJuiciosEvaluativosExcel(
         totalJuiciosPorEvaluar++;
       }
 
-      const fechaJuicio = cols[colFechaJuicio] || '';
+      // En el .xls de SofiaPlus la fecha viene como número serial de Excel
+      // (p.ej. 46095.45278); se convierte a "dd/mm/aaaa hh:mm".
+      const fechaCruda = (cols[colFechaJuicio] || '').trim();
+      const fechaJuicio = /^\d{5}(\.\d+)?$/.test(fechaCruda) ? serialExcelAFecha(Number(fechaCruda)) : fechaCruda;
       const funcionario = limpiarTextoEncoding(cols[colFuncionario] || '');
 
       // Extraer código de competencia si viene tipo "38362 - Diseñar la solución..."
@@ -386,6 +472,27 @@ export async function procesarJuiciosEvaluativosExcel(
       return a.nombresApellidos.localeCompare(b.nombresApellidos);
     });
 
+    // Control de cordura: una ficha real tiene decenas de aprendices, no
+    // miles. Si salen cientos, el archivo no es de una sola ficha o las
+    // columnas se leyeron corridas — mejor rechazar que integrar basura.
+    if (aprendicesList.length > 150) {
+      return fallo(
+        `El archivo se leyó con ${aprendicesList.length} aprendices distintos para la ficha ${metadata.fichaNumero}, lo cual no corresponde a una sola ficha. ` +
+        `Columnas detectadas: documento = "${headersOriginales[colNumDoc] || '?'}", competencia = "${headersOriginales[colComp] || '?'}", juicio = "${headersOriginales[colJuicio] || '?'}". ` +
+        `Verifica que sea el Reporte de Juicios de Evaluación de UNA ficha descargado de SofiaPlus.`,
+        { fichaNumero: metadata.fichaNumero, programaCodigo: metadata.programaCodigo, programaNombre: metadata.programaDenominacion, totalAprendices: aprendicesList.length, totalRegistrosJuicios: totalFilasValidas }
+      );
+    }
+    if (totalFilasValidas === 0) {
+      return fallo(
+        `No se encontró ningún juicio válido en el archivo de la ficha ${metadata.fichaNumero} (columna de documento detectada: "${headersOriginales[colNumDoc] || '?'}").`,
+        { fichaNumero: metadata.fichaNumero }
+      );
+    }
+    if (filasDescartadasOtraFicha > 0) {
+      advertencias.push(`Se ignoraron ${filasDescartadasOtraFicha} filas que pertenecían a otras fichas distintas a la ${metadata.fichaNumero}.`);
+    }
+
     // Desglose detallado de estados de matrícula
     const totalAprendices = aprendicesList.length;
     const aprendicesActivos = aprendicesList.filter(a => {
@@ -417,7 +524,7 @@ export async function procesarJuiciosEvaluativosExcel(
     // Consolidar objeto de reporte (solo datos estructurados necesarios, sin blobs pesados)
     const reporte: ReporteJuiciosFicha = {
       id: `rep_juicios_${metadata.fichaNumero || 'sofia'}_${Date.now()}`,
-      fichaNumero: metadata.fichaNumero || '3235106',
+      fichaNumero: metadata.fichaNumero,
       fechaCargue: new Date().toISOString(),
       archivoNombre: typeof archivo === 'string' ? nombreArchivo : (archivo.name || nombreArchivo),
       metadata,
@@ -505,7 +612,7 @@ Estado de la Ficha de Caracterización:;;EN EJECUCION;;;;;;;;;;;
 Fecha Inicio:;;25/07/2025;;;;;;;;;;;
 Fecha Fin:;;24/10/2027;;;;;;;;;;;
 Modalidad de Formación:;;PRESENCIAL;;;;;;;;;;;
-Regional:;;20 - REGIONAL CESAR;;;;;;;;;;;
+Regional:;;20 - REGIONAL;;;;;;;;;;;
 Centro de Formación:;;9114 - CENTRO DE ATENCION INTEGRAL AL CAMPESINO;;;;;;;;;;;
 Tipo de Documento;Número de Documento;Nombre;Apellidos;Estado;Competencia;Resultado de Aprendizaje;Juicio de Evaluación;;Fecha y Hora del Juicio Evaluativo;Funcionario que registro el juicio evaluativo;;;
 CC;1003003844;ANDREA DEL PILAR;GALINDO CASTRO;RETIRO VOLUNTARIO;2 - RESULTADOS DE APRENDIZAJE ETAPA PRACTICA;590803 - APLICAR EN LA RESOLUCIÓN DE PROBLEMAS REALES DEL SECTOR PRODUCTIVO;POR EVALUAR;;;  -   ;;;
@@ -576,7 +683,7 @@ Estado de la Ficha de Caracterización:;;EN EJECUCION;;;;;;;;;;;
 Fecha Inicio:;;25/07/2025;;;;;;;;;;;
 Fecha Fin:;;24/10/2027;;;;;;;;;;;
 Modalidad de Formación:;;PRESENCIAL;;;;;;;;;;;
-Regional:;;20 - REGIONAL CESAR;;;;;;;;;;;
+Regional:;;20 - REGIONAL;;;;;;;;;;;
 Centro de Formación:;;9114 - CENTRO DE ATENCION INTEGRAL AL CAMPESINO;;;;;;;;;;;
 Tipo de Documento;Número de Documento;Nombre;Apellidos;Estado;Competencia;Resultado de Aprendizaje;Juicio de Evaluación;;Fecha y Hora del Juicio Evaluativo;Funcionario que registro el juicio evaluativo;;;
 CC;1003003844;ANDREA DEL PILAR;GALINDO CASTRO;RETIRO VOLUNTARIO;2 - RESULTADOS DE APRENDIZAJE ETAPA PRACTICA;590803 - APLICAR EN LA RESOLUCIÓN DE PROBLEMAS REALES DEL SECTOR PRODUCTIVO;POR EVALUAR;;;  -   ;;;

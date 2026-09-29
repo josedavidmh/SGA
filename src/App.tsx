@@ -76,13 +76,49 @@ import {
   fetchActividadesSeguimientoFromSupabase,
   upsertActividadSeguimientoInSupabase,
   fetchRapsSeguimientoFromSupabase,
-  upsertRapSeguimientoInSupabase
+  upsertRapSeguimientoInSupabase,
+  fetchCompetenciasFromSupabase,
+  bulkUpsertCompetenciasInSupabase,
+  deleteCompetenciasByProgramaFromSupabase,
+  deleteAllCompetenciasFromSupabase,
+  fetchRapsFromSupabase,
+  bulkUpsertRapsInSupabase,
+  deleteRapsByProgramaFromSupabase,
+  deleteAllRapsFromSupabase,
+  fetchHorariosFromSupabase,
+  insertHorarioInSupabase,
+  updateHorarioInSupabase,
+  deleteHorarioFromSupabase,
+  fetchUsuariosFromSupabase,
+  upsertUsuarioInSupabase,
+  deleteUsuarioFromSupabase,
+  fetchAuditoriaSistemaFromSupabase,
+  fetchProgramasFromSupabase,
+  upsertProgramaInSupabase,
+  deleteProgramaFromSupabase,
+  fetchEspecialidadesFromSupabase,
+  upsertEspecialidadInSupabase,
+  deleteEspecialidadFromSupabase,
+  fetchTrimestresFromSupabase,
+  upsertTrimestreInSupabase,
+  deleteTrimestreFromSupabase,
+  fetchArchivoSeguimientoFromSupabase,
+  bulkUpsertArchivoSeguimientoInSupabase,
+  deleteArchivoSeguimientoByProgramaFromSupabase,
+  deleteAllArchivoSeguimientoFromSupabase,
+  fetchAuditoriaIngestasFromSupabase,
+  insertAuditoriaIngestaInSupabase,
+  reemplazarCatalogoProgramasEnSupabase,
+  esUuidValido,
+  fetchHorasEjecutadasFromSupabase,
+  reemplazarHorasFichaEnSupabase
 } from './services/supabaseService';
 import { 
   caracterizarInstructoresDesdeJuicios,
-  caracterizarInstructoresDesdeHoras
+  caracterizarInstructoresDesdeHoras,
+  crearOEnriquecerInstructoresDesdeHoras
 } from './services/instructorRecomendacionService';
-import { emparejarJuicioConCatalogo } from './services/cruceJuiciosService';
+import { emparejarJuicioConCatalogo, matchCompetencia } from './services/cruceJuiciosService';
 import { 
   generarEspecialidadesDesdeCompetencias 
 } from './services/planeacionPedagogicaService';
@@ -100,6 +136,7 @@ import {
   Competencia,
   ResultadoAprendizaje,
   RegistroHorasEjecutadas,
+  TotalesHorasSofia,
   ReporteJuiciosFicha,
   EspecialidadTematica,
   AmbienteAprendizaje,
@@ -110,7 +147,7 @@ import {
   TrimestreCalendario
 } from './types';
 import { 
-  CENTRO_SENA_DEFAULT, 
+  CENTRO_FORMACION_DEFAULT, 
   USUARIOS_INICIALES, 
   FICHAS_INICIALES, 
   INSTRUCTORES_INICIALES, 
@@ -181,7 +218,7 @@ export default function App() {
   const [activeTab, setActiveTab] = React.useState<string>('dashboard');
 
   // Estado del Dominio de Datos
-  const [centro] = React.useState(CENTRO_SENA_DEFAULT);
+  const [centro] = React.useState(CENTRO_FORMACION_DEFAULT);
 
   // Fichas reales: inicia completamente vacía (0 fichas) para que el usuario las registre manualmente
   const [fichas, setFichas] = React.useState<Ficha[]>(() => {
@@ -430,13 +467,24 @@ export default function App() {
     localStorage.setItem('sena_archivo_seguimiento_registros', JSON.stringify(registrosArchivoSeguimiento));
   }, [registrosArchivoSeguimiento]);
 
-  // Reportes de Horas Ejecutadas por Instructor y Competencia.
-  // IMPORTANTE: a propósito NO se persiste en localStorage. Este archivo se
-  // vuelve a cargar cada vez que SofiaPlus se actualiza (es progresivo, no
-  // acumulativo), así que solo se usa para comparar y extraer datos durante
-  // la sesión — lo que debe sobrevivir de verdad queda en registrosHorasFicha
-  // ya agregado, no en el crudo del archivo.
-  const [registrosHorasEjecutadas, setRegistrosHorasEjecutadas] = React.useState<RegistroHorasEjecutadas[]>([]);
+  // Horas por competencia de cada ficha, del "Reporte de Instructores por
+  // Ficha" de SofiaPlus. Se guarda YA emparejado contra el catálogo de
+  // competencias (una fila por instructor+competencia) en Supabase
+  // (horas_ejecutadas_ficha) y como respaldo en este navegador. Cada cargue
+  // reemplaza lo anterior de esa ficha. Antes vivía solo en memoria: al
+  // recargar la página las horas desaparecían de Seguimiento.
+  const [registrosHorasEjecutadas, setRegistrosHorasEjecutadas] = React.useState<RegistroHorasEjecutadas[]>(() => {
+    try {
+      const saved = localStorage.getItem('sena_horas_ejecutadas_ficha');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem('sena_horas_ejecutadas_ficha', JSON.stringify(registrosHorasEjecutadas)); } catch { /* sin espacio */ }
+  }, [registrosHorasEjecutadas]);
 
   // Reportes de Juicios Evaluativos SofiaPlus por Ficha.
   // IMPORTANTE: tampoco se persiste en localStorage por la misma razón — el
@@ -572,10 +620,16 @@ export default function App() {
       }
       return [...prev, t];
     });
+    upsertTrimestreInSupabase(t).catch(err => {
+      console.error('Error al guardar el trimestre de calendario en Supabase:', err);
+    });
   };
 
   const handleEliminarTrimestreCalendario = (id: string) => {
     setTrimestresCalendario(prev => prev.filter(t => t.id !== id));
+    deleteTrimestreFromSupabase(id).catch(err => {
+      console.error('Error al eliminar el trimestre de calendario en Supabase:', err);
+    });
   };
 
   const [selectedProgramaForCompetencias, setSelectedProgramaForCompetencias] = React.useState<string>('228118');
@@ -607,6 +661,58 @@ export default function App() {
   // Sincronización en vivo desde PostgreSQL / Supabase al cargar la app
   const [isSyncingSupabase, setIsSyncingSupabase] = React.useState<boolean>(false);
 
+  // --- Catálogo curricular (Competencias + RAPs) → Supabase -------------
+  // Referencias siempre actualizadas del catálogo local, para que la
+  // sincronización inicial (que se define una sola vez) pueda leerlo.
+  const competenciasRef = React.useRef<Competencia[]>(competencias);
+  const rapsRef = React.useRef<ResultadoAprendizaje[]>(raps);
+  const usuariosRef = React.useRef<User[]>(usuarios);
+  const instructoresRef = React.useRef<Instructor[]>(instructores);
+  React.useEffect(() => { instructoresRef.current = instructores; }, [instructores]);
+  const rapsSeguimientoRef = React.useRef<RapSeguimiento[]>(rapsSeguimiento);
+  React.useEffect(() => { rapsSeguimientoRef.current = rapsSeguimiento; }, [rapsSeguimiento]);
+  const horariosRef = React.useRef<BloqueHorario[]>(horarios);
+  React.useEffect(() => { horariosRef.current = horarios; }, [horarios]);
+  React.useEffect(() => { competenciasRef.current = competencias; }, [competencias]);
+  React.useEffect(() => { rapsRef.current = raps; }, [raps]);
+  React.useEffect(() => { usuariosRef.current = usuarios; }, [usuarios]);
+
+  // Las escrituras del catálogo se encadenan (una termina antes de que
+  // empiece la siguiente): cada una borra y reinserta por programa, y dos
+  // ejecuciones intercaladas podían duplicar o perder filas.
+  const catalogoSyncChainRef = React.useRef<Promise<void>>(Promise.resolve());
+
+  const sincronizarCatalogoEnSupabase = (
+    programasAfectados: (string | null)[],
+    comps: Competencia[],
+    rapsLista: ResultadoAprendizaje[],
+    mostrarAlertaSiFalla: boolean = true
+  ) => {
+    catalogoSyncChainRef.current = catalogoSyncChainRef.current
+      .then(async () => {
+        const res = await reemplazarCatalogoProgramasEnSupabase(programasAfectados, comps, rapsLista);
+        if (!res.success) {
+          console.error('Error al guardar competencias/RAPs en Supabase:', res.error);
+          if (mostrarAlertaSiFalla) {
+            alert(
+              `Las competencias y RAPs quedaron en este navegador, pero NO se pudieron guardar en Supabase:\n\n${res.error}\n\n` +
+              `Si el mensaje menciona una columna, un tipo de dato, una restricción o un permiso, corre en el SQL Editor de Supabase el script 20260929c_reparar_persistencia_competencias_raps.sql y vuelve a intentarlo.`
+            );
+          }
+        } else {
+          console.info(`Catálogo guardado en Supabase: ${res.data?.competencias ?? 0} competencias, ${res.data?.raps ?? 0} RAPs.`);
+        }
+      })
+      .catch(err => {
+        console.error('Error inesperado al guardar competencias/RAPs en Supabase:', err);
+      });
+  };
+
+  // Garantiza ids UUID válidos (los datos viejos guardados en este navegador
+  // traen ids tipo `comp_...` / `rap_...` que Supabase rechaza).
+  const sanearIdsCatalogo = <T extends { id: string }>(lista: T[]): T[] =>
+    lista.map(x => (esUuidValido(x.id) ? x : { ...x, id: generarUuid() }));
+
   const sincronizarDatosDesdeSupabase = React.useCallback(async () => {
     setIsSyncingSupabase(true);
     try {
@@ -630,7 +736,12 @@ export default function App() {
                 ...merged[index],
                 ...dbInst,
                 id: dbInst.id,
-                horasSemanalesAsignadas: merged[index].horasSemanalesAsignadas || dbInst.horasSemanalesAsignadas
+                horasSemanalesAsignadas: merged[index].horasSemanalesAsignadas || dbInst.horasSemanalesAsignadas,
+                // nombre_completo en Supabase es una columna generada a partir de
+                // nombres+apellidos SIN el prefijo "Ing." que este formulario le
+                // agrega localmente — se preserva el nombre local para no perder
+                // ese prefijo cada vez que se sincroniza.
+                nombreCompleto: merged[index].nombreCompleto || dbInst.nombreCompleto
               };
             } else {
               merged.push(dbInst);
@@ -640,6 +751,31 @@ export default function App() {
         });
       } else {
         setInstructores(prev => prev.filter(p => !p.id.startsWith('a0000000-0000-0000-0000-')));
+      }
+
+      // 1a. Instructores que solo existen en este navegador (p.ej. los
+      // detectados desde Juicios): se suben para que el seguimiento que los
+      // referencia pueda guardarse en Supabase.
+      {
+        const enDb = dbInstructores || [];
+        const existeEnDb = (i: Instructor) => enDb.some(d =>
+          d.id === i.id ||
+          (i.email && d.email && d.email.trim().toLowerCase() === i.email.trim().toLowerCase()) ||
+          (i.documento && d.documento && String(d.documento).trim() === String(i.documento).trim())
+        );
+        const soloLocales = instructoresRef.current.filter(i => !i.id.startsWith('a0000000-0000-0000-0000-') && !existeEnDb(i));
+        const idsCambiados = new Map<string, string>();
+        for (const inst of soloLocales) {
+          const idFinal = esUuidValido(inst.id) ? inst.id : generarUuid();
+          if (idFinal !== inst.id) idsCambiados.set(inst.id, idFinal);
+          const r = await insertInstructorInSupabase({ ...inst, id: idFinal });
+          if (!r.success) console.error(`No se pudo subir a Supabase el instructor ${inst.nombreCompleto}:`, r.error);
+        }
+        if (idsCambiados.size > 0) {
+          setInstructores(prev => prev.map(i => idsCambiados.has(i.id) ? { ...i, id: idsCambiados.get(i.id)! } : i));
+          setRapsSeguimiento(prev => prev.map(r => r.instructorId && idsCambiados.has(r.instructorId) ? { ...r, instructorId: idsCambiados.get(r.instructorId) } : r));
+          rapsSeguimientoRef.current = rapsSeguimientoRef.current.map(r => r.instructorId && idsCambiados.has(r.instructorId) ? { ...r, instructorId: idsCambiados.get(r.instructorId) } : r);
+        }
       }
 
       // 2. Sincronización de Fichas
@@ -661,13 +797,43 @@ export default function App() {
               instructorLiderEmail: infoLider?.email || (index >= 0 ? merged[index].instructorLiderEmail : dbFicha.instructorLiderEmail)
             };
             if (index >= 0) {
-              merged[index] = { ...merged[index], ...fichaResuelta, id: dbFicha.id };
+              const local = merged[index];
+              merged[index] = {
+                ...local,
+                ...fichaResuelta,
+                id: dbFicha.id,
+                // Si Supabase no trae estos datos (columna sin crear o vacía),
+                // se conserva lo calculado localmente desde Juicios.
+                tasaRetencion: fichaResuelta.tasaRetencion ?? local.tasaRetencion,
+                tasaDesercion: fichaResuelta.tasaDesercion ?? local.tasaDesercion,
+                aprendicesCondicionados: fichaResuelta.aprendicesCondicionados ?? local.aprendicesCondicionados,
+                aprendicesTrasladados: fichaResuelta.aprendicesTrasladados ?? local.aprendicesTrasladados,
+                progresoCurricular: fichaResuelta.progresoCurricular ?? local.progresoCurricular ?? 0
+              };
             } else {
-              merged.push(fichaResuelta);
+              merged.push({
+                ...fichaResuelta,
+                tasaRetencion: fichaResuelta.tasaRetencion ?? 100,
+                tasaDesercion: fichaResuelta.tasaDesercion ?? 0,
+                progresoCurricular: fichaResuelta.progresoCurricular ?? 0
+              });
             }
           }
           return merged;
         });
+      }
+
+      // 2a. Horas por competencia de cada ficha (Reporte de Instructores por
+      // Ficha). Para cada ficha que tenga horas en Supabase, esas mandan.
+      {
+        const dbHoras = await fetchHorasEjecutadasFromSupabase();
+        if (dbHoras.length > 0) {
+          const fichasConHoras = new Set(dbHoras.map(h => h.fichaNumero));
+          setRegistrosHorasEjecutadas(prev => [
+            ...prev.filter(h => !fichasConHoras.has(h.fichaNumero)),
+            ...dbHoras
+          ]);
+        }
       }
 
       // 3. Sincronización de Ambientes (si existe en Supabase)
@@ -695,6 +861,24 @@ export default function App() {
 
       // 5. Sincronización de Seguimiento por RAP individual (instructor asignado + estado)
       const dbRapsSeguimiento = await fetchRapsSeguimientoFromSupabase();
+
+      // 5a. Seguimiento por RAP que solo existe en este navegador (p.ej. lo
+      // calificado desde Juicios mientras Supabase lo rechazaba): se sube.
+      {
+        const enDb = dbRapsSeguimiento || [];
+        const pendientes = rapsSeguimientoRef.current.filter(l => !enDb.some(d =>
+          (d.fichaId === l.fichaId || d.fichaNumero === l.fichaNumero) &&
+          d.competenciaCodigo === l.competenciaCodigo && d.rapCodigo === l.rapCodigo
+        ));
+        const fichasEnDb = new Map((dbFichas || []).map(f => [f.numero_ficha, f.id]));
+        for (const item of pendientes) {
+          // La ficha debe existir en Supabase; se usa su id real.
+          const fichaIdDb = fichasEnDb.get(item.fichaNumero) || item.fichaId;
+          if (!esUuidValido(fichaIdDb)) continue;
+          const r = await upsertRapSeguimientoInSupabase({ ...item, id: esUuidValido(item.id) ? item.id : generarUuid(), fichaId: fichaIdDb });
+          if (!r.success) console.error(`No se pudo subir el seguimiento ${item.competenciaCodigo}/${item.rapCodigo}:`, r.error);
+        }
+      }
       if (dbRapsSeguimiento && dbRapsSeguimiento.length > 0) {
         setRapsSeguimiento(prev => {
           const merged = [...prev];
@@ -704,6 +888,251 @@ export default function App() {
               merged[index] = dbSeg;
             } else {
               merged.push(dbSeg);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 6. Sincronización de Competencias (catálogo curricular)
+      const dbCompetencias = await fetchCompetenciasFromSupabase();
+      if (dbCompetencias && dbCompetencias.length > 0) {
+        setCompetencias(prev => {
+          const merged = [...prev];
+          for (const dbComp of dbCompetencias) {
+            const index = merged.findIndex(c =>
+              c.id === dbComp.id ||
+              (c.codigo === dbComp.codigo && (c.programaCodigo || '') === (dbComp.programaCodigo || ''))
+            );
+            if (index >= 0) {
+              merged[index] = dbComp;
+            } else {
+              merged.push(dbComp);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 7. Sincronización de Resultados de Aprendizaje (catálogo de RAPs)
+      const dbRaps = await fetchRapsFromSupabase();
+      if (dbRaps && dbRaps.length > 0) {
+        setRaps(prev => {
+          const merged = [...prev];
+          for (const dbRap of dbRaps) {
+            const index = merged.findIndex(r =>
+              r.id === dbRap.id ||
+              ((r.programaCodigo || '') === (dbRap.programaCodigo || '') &&
+               r.competenciaCodigo === dbRap.competenciaCodigo &&
+               r.codigoRap === dbRap.codigoRap)
+            );
+            if (index >= 0) {
+              merged[index] = dbRap;
+            } else {
+              merged.push(dbRap);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 7b. Si Supabase todavía no tiene NADA del catálogo pero este
+      // navegador sí (lo que pasó hasta ahora: todo se quedaba solo en
+      // localStorage porque Supabase lo rechazaba), se sube lo local una vez,
+      // sin tener que volver a cargar el Excel.
+      if ((dbCompetencias?.length ?? 0) === 0 && (dbRaps?.length ?? 0) === 0) {
+        const localComps = sanearIdsCatalogo(competenciasRef.current);
+        const localRaps = sanearIdsCatalogo(rapsRef.current);
+        if (localComps.length > 0 || localRaps.length > 0) {
+          setCompetencias(localComps);
+          setRaps(localRaps);
+          const progs = Array.from(new Set<string | null>([
+            ...localComps.map(c => c.programaCodigo || null),
+            ...localRaps.map(r => r.programaCodigo || null)
+          ]));
+          sincronizarCatalogoEnSupabase(progs, localComps, localRaps);
+        }
+      }
+
+      // 8. Sincronización de Bloques de Horario (Matriz de Horarios)
+      const dbHorarios = await fetchHorariosFromSupabase();
+
+      // 8a. Bloques que existen en este navegador pero no en Supabase (todos
+      // los creados mientras Supabase los rechazaba por la columna
+      // instructor_nombre): se suben ahora. Si alguno tenía id viejo no-UUID
+      // (blq_...), se corrige también en pantalla.
+      {
+        const idsEnDb = new Set((dbHorarios || []).map(b => b.id));
+        const idsCorregidos = new Map<string, string>();
+        const locales = horariosRef.current.map(b => {
+          if (esUuidValido(b.id)) return b;
+          const nuevoId = generarUuid();
+          idsCorregidos.set(b.id, nuevoId);
+          return { ...b, id: nuevoId };
+        });
+        if (idsCorregidos.size > 0) {
+          setHorarios(prev => prev.map(b => idsCorregidos.has(b.id) ? { ...b, id: idsCorregidos.get(b.id)! } : b));
+        }
+        const pendientes = locales.filter(b => !idsEnDb.has(b.id));
+        let fallidos = 0;
+        let primerError = '';
+        for (const b of pendientes) {
+          const res = await insertHorarioInSupabase(b);
+          if (!res.success) {
+            fallidos++;
+            if (!primerError) primerError = res.error || '';
+            console.error(`No se pudo subir a Supabase el bloque ${b.diaSemana} ${b.franja} (${b.rapCodigo}):`, res.error);
+          }
+        }
+        if (fallidos > 0) {
+          alert(`${pendientes.length - fallidos} de ${pendientes.length} bloques de horario que estaban solo en este navegador se subieron a Supabase. ${fallidos} no se pudieron subir:\n\n${primerError}`);
+        }
+      }
+      if (dbHorarios && dbHorarios.length > 0) {
+        setHorarios(prev => {
+          const merged = [...prev];
+          for (const dbBloque of dbHorarios) {
+            const index = merged.findIndex(h => h.id === dbBloque.id);
+            if (index >= 0) {
+              merged[index] = dbBloque;
+            } else {
+              merged.push(dbBloque);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 9. Sincronización de Usuarios (cuentas de acceso). Se empareja por
+      // correo (no por id: un usuario vinculado a un instructor tiene un id
+      // local con formato `usr_<idInstructor>`, no un UUID). La clave NUNCA
+      // se trae de Supabase — se preserva la que ya existe localmente.
+      const dbUsuarios = await fetchUsuariosFromSupabase();
+
+      // 9a. Usuarios que existen en este navegador pero NO en Supabase (p.ej.
+      // la cuenta del instructor creada mientras Supabase rechazaba los
+      // inserts por permisos): se suben ahora, con el hash de su clave.
+      const correosEnDb = new Set((dbUsuarios || []).map(u => u.correo.toLowerCase()));
+      const soloLocales = usuariosRef.current.filter(u => u.correo && !correosEnDb.has(u.correo.toLowerCase()));
+      for (const u of soloLocales) {
+        const res = await upsertUsuarioInSupabase(u);
+        if (!res.success) {
+          console.error(`No se pudo subir a Supabase el usuario ${u.correo}:`, res.error);
+        }
+      }
+
+      if (dbUsuarios && dbUsuarios.length > 0) {
+        setUsuarios(prev => {
+          const merged = [...prev];
+          for (const dbUser of dbUsuarios) {
+            const index = merged.findIndex(u => u.correo.toLowerCase() === dbUser.correo.toLowerCase());
+            if (index >= 0) {
+              merged[index] = { ...dbUser, clave: merged[index].clave, fichaAsignadaId: merged[index].fichaAsignadaId };
+            } else {
+              merged.push(dbUser);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 10. Sincronización de Auditoría de Sistema (visibilidad compartida
+      // del historial de acciones entre distintos equipos/navegadores).
+      const dbAuditoria = await fetchAuditoriaSistemaFromSupabase();
+      if (dbAuditoria && dbAuditoria.length > 0) {
+        setAuditoriaSistema(prev => {
+          const merged = [...prev];
+          for (const dbLog of dbAuditoria) {
+            const index = merged.findIndex(a => a.id === dbLog.id);
+            if (index >= 0) {
+              merged[index] = dbLog;
+            } else {
+              merged.push(dbLog);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 11. Sincronización de Programas de Formación (catálogo)
+      const dbProgramas = await fetchProgramasFromSupabase();
+      if (dbProgramas && dbProgramas.length > 0) {
+        setProgramas(prev => {
+          const merged = [...prev];
+          for (const dbProg of dbProgramas) {
+            const index = merged.findIndex(p => p.id === dbProg.id || p.codigo === dbProg.codigo);
+            if (index >= 0) {
+              merged[index] = dbProg;
+            } else {
+              merged.push(dbProg);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 12. Sincronización de Especialidades Temáticas
+      const dbEspecialidades = await fetchEspecialidadesFromSupabase();
+      if (dbEspecialidades && dbEspecialidades.length > 0) {
+        setEspecialidades(prev => {
+          const merged = [...prev];
+          for (const dbEsp of dbEspecialidades) {
+            const index = merged.findIndex(e => e.id === dbEsp.id);
+            if (index >= 0) {
+              merged[index] = dbEsp;
+            } else {
+              merged.push(dbEsp);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 13. Sincronización del Calendario de Trimestres
+      const dbTrimestres = await fetchTrimestresFromSupabase();
+      if (dbTrimestres && dbTrimestres.length > 0) {
+        setTrimestresCalendario(prev => {
+          const merged = [...prev];
+          for (const dbT of dbTrimestres) {
+            const index = merged.findIndex(t => t.id === dbT.id);
+            if (index >= 0) {
+              merged[index] = dbT;
+            } else {
+              merged.push(dbT);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 14. Sincronización de los registros granulares del Archivo de Seguimiento
+      const dbArchivoSeguimiento = await fetchArchivoSeguimientoFromSupabase();
+      if (dbArchivoSeguimiento && dbArchivoSeguimiento.length > 0) {
+        setRegistrosArchivoSeguimiento(prev => {
+          const merged = [...prev];
+          for (const dbReg of dbArchivoSeguimiento) {
+            const index = merged.findIndex(r => r.id === dbReg.id);
+            if (index >= 0) {
+              merged[index] = dbReg;
+            } else {
+              merged.push(dbReg);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 15. Sincronización de la Auditoría de Ingestas de Excel
+      const dbAuditoriaIngestas = await fetchAuditoriaIngestasFromSupabase();
+      if (dbAuditoriaIngestas && dbAuditoriaIngestas.length > 0) {
+        setAuditoriaIngestas(prev => {
+          const merged = [...prev];
+          for (const dbIng of dbAuditoriaIngestas) {
+            const index = merged.findIndex(i => i.id === dbIng.id);
+            if (index >= 0) {
+              merged[index] = dbIng;
+            } else {
+              merged.push(dbIng);
             }
           }
           return merged;
@@ -734,13 +1163,19 @@ export default function App() {
       detalles
     };
     setAuditoriaSistema(prev => [nuevoLog, ...prev]);
-    logSistemaEnSupabase(accion, modulo, detalles, currentUser.nombre_completo);
+    logSistemaEnSupabase(accion, modulo, detalles, currentUser.nombre_completo, currentUser.rol);
   };
 
   // Manejo de Inicio y Cierre de Sesión
-  const handleLoginSuccess = (user: User) => {
+  const handleLoginSuccess = (user: User, claveIngresada: string) => {
     setCurrentUser(user);
     setIsAuthenticated(true);
+    // Si la validación pasó por el hash de Supabase (este navegador todavía no
+    // tenía la clave en texto plano localmente), se cachea aquí para que el
+    // próximo inicio de sesión en este mismo navegador sea inmediato.
+    if (!user.clave || user.clave !== claveIngresada) {
+      setUsuarios(prev => prev.map(u => u.id === user.id ? { ...u, clave: claveIngresada } : u));
+    }
     if (user.rol === 'INSTRUCTOR_LIDER') {
       const fichaLider = fichas.find(f => f.id === user.fichaAsignadaId || f.instructorLiderId === user.id || f.instructorLiderEmail === user.correo) || fichas[0] || null;
       if (fichaLider) setSelectedFicha(fichaLider);
@@ -782,6 +1217,21 @@ export default function App() {
   // Gestión de Usuarios por el Administrador
   const handleCrearUsuario = (nuevoUser: User) => {
     setUsuarios(prev => [...prev, nuevoUser]);
+    // OJO: upsertUsuarioInSupabase() SIEMPRE resuelve la promesa (nunca la
+    // rechaza — internamente atrapa cualquier error y lo devuelve como
+    // { success: false, error }), así que un .catch() a secas NUNCA se
+    // disparaba aquí, ni siquiera cuando Supabase rechazaba el insert. Por
+    // eso una falla (RLS, restricción, columna, lo que sea) quedaba
+    // completamente invisible — ni un console.error. Ahora sí se revisa
+    // res.success explícitamente.
+    upsertUsuarioInSupabase(nuevoUser).then(res => {
+      if (!res.success) {
+        console.error('Error al crear usuario en Supabase:', res.error);
+        alert(`El usuario se guardó localmente, pero NO se pudo sincronizar con Supabase (solo quedará en este navegador hasta corregirlo):\n\n${res.error}`);
+      }
+    }).catch(err => {
+      console.error('Error al crear usuario en Supabase:', err);
+    });
     registrarLog('CREAR_USUARIO', 'Gestión de Usuarios', `Usuario ${nuevoUser.nombre_completo} (${nuevoUser.rol}) creado.`);
     alert(`¡Usuario ${nuevoUser.nombre_completo} creado con éxito!\nCorreo: ${nuevoUser.correo}\nRol: ${nuevoUser.rol}`);
   };
@@ -791,8 +1241,61 @@ export default function App() {
     if (!userTarget) return;
     if (confirm(`¿Confirma que desea eliminar la cuenta de ${userTarget.nombre_completo}?`)) {
       setUsuarios(prev => prev.filter(u => u.id !== usuarioId));
+      deleteUsuarioFromSupabase(userTarget.correo).then(res => {
+        if (!res.success) console.error('Error al eliminar usuario en Supabase:', res.error);
+      }).catch(err => {
+        console.error('Error al eliminar usuario en Supabase:', err);
+      });
       registrarLog('ELIMINAR_USUARIO', 'Gestión de Usuarios', `Usuario ${userTarget.nombre_completo} eliminado.`);
     }
+  };
+
+  // El Administrador puede editar la clave de acceso de cualquier usuario del sistema
+  const handleEditarClaveUsuario = (usuarioId: string, nuevaClave: string) => {
+    const userTarget = usuarios.find(u => u.id === usuarioId);
+    if (!userTarget) return;
+    setUsuarios(prev => prev.map(u => u.id === usuarioId ? { ...u, clave: nuevaClave } : u));
+    // Sube el HASH (no la clave en texto plano) a Supabase, para que la
+    // nueva clave también sirva para iniciar sesión desde otro navegador/equipo.
+    upsertUsuarioInSupabase({ ...userTarget, clave: nuevaClave }).then(res => {
+      if (!res.success) {
+        console.error('Error al sincronizar el hash de la nueva clave en Supabase:', res.error);
+        alert(`La clave se cambió localmente, pero NO se pudo sincronizar con Supabase:\n\n${res.error}`);
+      }
+    }).catch(err => {
+      console.error('Error al sincronizar el hash de la nueva clave en Supabase:', err);
+    });
+    registrarLog('EDITAR_CLAVE_USUARIO', 'Gestión de Usuarios', `Clave de acceso de ${userTarget.nombre_completo} actualizada por el administrador.`);
+  };
+
+  // El Administrador puede corregir el correo de acceso de cualquier usuario —
+  // esto es lo que resuelve el caso típico de "no me deja entrar con el correo
+  // que le registré": el correo con el que se creó la cuenta no coincide
+  // exactamente (typo, dominio distinto, etc.) con el que la persona usa para
+  // iniciar sesión, y antes no había forma de corregirlo sin borrar y volver a
+  // crear el usuario.
+  const handleEditarCorreoUsuario = (usuarioId: string, nuevoCorreo: string): { exito: boolean; mensaje: string } => {
+    const userTarget = usuarios.find(u => u.id === usuarioId);
+    if (!userTarget) return { exito: false, mensaje: 'Usuario no encontrado.' };
+    const correoNormalizado = nuevoCorreo.trim().toLowerCase();
+    if (!correoNormalizado || !correoNormalizado.includes('@')) {
+      return { exito: false, mensaje: 'Ingrese un correo electrónico válido.' };
+    }
+    const yaExiste = usuarios.some(u => u.id !== usuarioId && u.correo.toLowerCase() === correoNormalizado);
+    if (yaExiste) {
+      return { exito: false, mensaje: 'Ya existe otro usuario registrado con ese correo.' };
+    }
+    setUsuarios(prev => prev.map(u => u.id === usuarioId ? { ...u, correo: correoNormalizado } : u));
+    upsertUsuarioInSupabase({ ...userTarget, correo: correoNormalizado }, userTarget.correo).then(res => {
+      if (!res.success) {
+        console.error('Error al actualizar correo de usuario en Supabase:', res.error);
+        alert(`El correo se cambió localmente, pero NO se pudo sincronizar con Supabase:\n\n${res.error}`);
+      }
+    }).catch(err => {
+      console.error('Error al actualizar correo de usuario en Supabase:', err);
+    });
+    registrarLog('EDITAR_CORREO_USUARIO', 'Gestión de Usuarios', `Correo de acceso de ${userTarget.nombre_completo} actualizado por el administrador (${userTarget.correo} → ${correoNormalizado}).`);
+    return { exito: true, mensaje: 'Correo actualizado.' };
   };
 
   // Creación Manual de Ficha
@@ -810,7 +1313,7 @@ export default function App() {
         fichaId: nuevaFicha.id,
         fase: 'Fase 1: Análisis',
         competenciaCodigo: '220501092',
-        competenciaDenominacion: 'Levantamiento de requisitos del software según estándares SENA',
+        competenciaDenominacion: 'Levantamiento de requisitos del software según estándares curriculares',
         rapCodigo: 'RAP 01',
         rapDenominacion: 'Determinar los requisitos funcionales mediante entrevistas y diagramas',
         actividadAprendizaje: 'Diseño del documento de especificación de requisitos de software (SRS IEEE 830)',
@@ -872,7 +1375,7 @@ export default function App() {
   };
 
   // Creación y Edición de Instructor
-  const handleGuardarInstructor = (instructorActualizado: Instructor, crearCuentaUsuario: boolean = true, claveUsuario: string = 'Sena2026*') => {
+  const handleGuardarInstructor = (instructorActualizado: Instructor, crearCuentaUsuario: boolean = true, claveUsuario: string = 'Sistema2026*') => {
     const esEdicion = instructores.some(i => i.id === instructorActualizado.id);
 
     if (esEdicion) {
@@ -915,6 +1418,25 @@ export default function App() {
         }
         return u;
       }));
+      if (instructorParaEditar) {
+        upsertUsuarioInSupabase(
+          {
+            id: `usr_${instructorActualizado.id}`,
+            correo: instructorActualizado.email.toLowerCase(),
+            nombre_completo: instructorActualizado.nombreCompleto,
+            rol: 'INSTRUCTOR_LIDER',
+            cargo: `Instructor Líder - ${instructorActualizado.especialidad}`
+          },
+          instructorParaEditar.email
+        ).then(res => {
+          if (!res.success) {
+            console.error('Error al actualizar usuario vinculado en Supabase:', res.error);
+            alert(`El instructor se actualizó, pero la cuenta de usuario vinculada NO se pudo sincronizar con Supabase:\n\n${res.error}`);
+          }
+        }).catch(err => {
+          console.error('Error al actualizar usuario vinculado en Supabase:', err);
+        });
+      }
 
       registrarLog(
         'EDICION_INSTRUCTOR',
@@ -923,16 +1445,17 @@ export default function App() {
       );
     } else {
       setInstructores(prev => [instructorActualizado, ...prev]);
-      insertInstructorInSupabase(instructorActualizado).catch(err => {
-        console.error('Error al insertar instructor en Supabase:', err);
-      });
+      // NOTA: no se vuelve a insertar aquí en Supabase — ModalCrearInstructor
+      // ya hace el insert (con manejo de error visible al usuario) ANTES de
+      // llamar a este handler. Insertar de nuevo con el mismo id solo
+      // generaba un conflicto de llave primaria silencioso en cada creación.
 
       // Crear cuenta de usuario si se solicitó
       if (crearCuentaUsuario) {
         const nuevoUser: User = {
           id: `usr_${instructorActualizado.id}`,
           correo: instructorActualizado.email.toLowerCase(),
-          clave: claveUsuario || 'Sena2026*',
+          clave: claveUsuario || 'Sistema2026*',
           nombre_completo: instructorActualizado.nombreCompleto,
           rol: 'INSTRUCTOR_LIDER',
           cargo: `Instructor Líder - ${instructorActualizado.especialidad}`,
@@ -944,6 +1467,14 @@ export default function App() {
           }
           return prev;
         });
+        upsertUsuarioInSupabase(nuevoUser).then(res => {
+          if (!res.success) {
+            console.error('Error al crear usuario vinculado en Supabase:', res.error);
+            alert(`El instructor se guardó, pero la cuenta de usuario vinculada NO se pudo sincronizar con Supabase (solo quedará en este navegador hasta corregirlo):\n\n${res.error}`);
+          }
+        }).catch(err => {
+          console.error('Error al crear usuario vinculado en Supabase:', err);
+        });
       }
 
       registrarLog(
@@ -952,7 +1483,7 @@ export default function App() {
         `Instructor ${instructorActualizado.nombreCompleto} (${instructorActualizado.especialidad}) registrado en planta de instructores${crearCuentaUsuario ? ' con usuario de acceso' : ''}.`
       );
 
-      alert(`¡Instructor ${instructorActualizado.nombreCompleto} registrado con éxito!${crearCuentaUsuario ? `\nUsuario de acceso creado: ${instructorActualizado.email}\nClave: ${claveUsuario || 'Sena2026*'}` : ''}`);
+      alert(`¡Instructor ${instructorActualizado.nombreCompleto} registrado con éxito!${crearCuentaUsuario ? `\nUsuario de acceso creado: ${instructorActualizado.email}\nClave: ${claveUsuario || 'Sistema2026*'}` : ''}`);
     }
   };
 
@@ -996,6 +1527,9 @@ export default function App() {
     setInstructores(prev => prev.filter(i => i.id !== id));
     // Eliminar cuenta de usuario vinculada si existe
     setUsuarios(prev => prev.filter(u => u.correo.toLowerCase() !== inst.email.toLowerCase()));
+    deleteUsuarioFromSupabase(inst.email).catch(err => {
+      console.error('Error al eliminar usuario vinculado en Supabase:', err);
+    });
 
     // Eliminar permanentemente de Supabase
     deleteInstructorFromSupabase(id).catch(err => {
@@ -1021,6 +1555,9 @@ export default function App() {
       }
       return [especialidad, ...prev];
     });
+    upsertEspecialidadInSupabase(especialidad).catch(err => {
+      console.error('Error al guardar la especialidad temática en Supabase:', err);
+    });
 
     registrarLog(
       'GUARDAR_ESPECIALIDAD_TEMATICA',
@@ -1032,6 +1569,9 @@ export default function App() {
   const handleEliminarEspecialidad = (id: string) => {
     const target = especialidades.find(e => e.id === id);
     setEspecialidades(prev => prev.filter(e => e.id !== id));
+    deleteEspecialidadFromSupabase(id).catch(err => {
+      console.error('Error al eliminar la especialidad temática en Supabase:', err);
+    });
     if (target) {
       registrarLog(
         'ELIMINAR_ESPECIALIDAD_TEMATICA',
@@ -1129,7 +1669,7 @@ export default function App() {
         duracionProductivaHoras: selectedFicha.horasIndependientesTotales || 864,
         duracionTotalHoras: (selectedFicha.horasDirectasTotales || 3120) + (selectedFicha.horasIndependientesTotales || 864),
         estado: 'ACTIVO',
-        descripcion: 'Programa de formación integral en el Centro Biotecnológico del Caribe.'
+        descripcion: 'Programa de formación integral.'
       };
       setProgramaParaEditar(nuevoProg);
     }
@@ -1193,6 +1733,13 @@ export default function App() {
         throw new Error(res.error || 'Row Level Security activo en Supabase');
       }
     }
+
+    // 6. Guardar el catálogo del programa en sí (metadatos como descripción/estado),
+    // que antes NO se guardaba en ningún lado de Supabase — solo se denormalizaban
+    // algunos campos sueltos dentro de las fichas asociadas.
+    upsertProgramaInSupabase(programaActualizado).catch(err => {
+      console.error('Error al guardar el programa de formación en Supabase:', err);
+    });
   };
 
   const handleEliminarPrograma = (programaId: string) => {
@@ -1203,6 +1750,18 @@ export default function App() {
       setFichas(prev => prev.filter(f => f.programaCodigo !== target.codigo));
       setCompetencias(prev => prev.filter(c => c.programaCodigo !== target.codigo));
       setRaps(prev => prev.filter(r => r.programaCodigo !== target.codigo));
+      deleteCompetenciasByProgramaFromSupabase(target.codigo).catch(err => {
+        console.error('Error al eliminar competencias del programa en Supabase:', err);
+      });
+      deleteRapsByProgramaFromSupabase(target.codigo).catch(err => {
+        console.error('Error al eliminar RAPs del programa en Supabase:', err);
+      });
+      deleteProgramaFromSupabase(target.id).catch(err => {
+        console.error('Error al eliminar el programa de formación en Supabase:', err);
+      });
+      deleteArchivoSeguimientoByProgramaFromSupabase(target.codigo).catch(err => {
+        console.error('Error al eliminar registros del archivo de seguimiento en Supabase:', err);
+      });
       if (selectedFicha?.programaCodigo === target.codigo) {
         setSelectedFicha(null);
       }
@@ -1271,7 +1830,12 @@ export default function App() {
     if (selectedFicha?.id === fichaActualizada.id) {
       setSelectedFicha(fichaActualizada);
     }
-    updateFichaInSupabase(fichaActualizada.id, fichaActualizada).catch(err => {
+    updateFichaInSupabase(fichaActualizada.id, fichaActualizada).then(res => {
+      if (!res.success) {
+        console.error('Error al actualizar ficha en Supabase:', res.error);
+        alert(`Los cambios de la ficha quedaron en pantalla, pero NO se guardaron en Supabase:\n\n${res.error}`);
+      }
+    }).catch(err => {
       console.error('Error al actualizar ficha en Supabase:', err);
     });
     setFichaParaEditar(null);
@@ -1288,20 +1852,56 @@ export default function App() {
     nuevosRaps: ResultadoAprendizaje[],
     nuevosRegistrosSeg?: RegistroArchivoSeguimiento[]
   ) => {
-    setCompetencias(nuevasComp);
-    setRaps(nuevosRaps);
+    // ids siempre UUID válidos (lo que viene de datos viejos o de cualquier
+    // pantalla que todavía genere ids con prefijo de texto se corrige aquí,
+    // en el único punto por donde pasa TODO cambio del catálogo).
+    const compsSaneadas = sanearIdsCatalogo(nuevasComp);
+    const rapsSaneados = sanearIdsCatalogo(nuevosRaps);
+    setCompetencias(compsSaneadas);
+    setRaps(rapsSaneados);
+
+    // Programas afectados = los que tenían algo antes + los que tienen algo
+    // ahora (así también se borra en Supabase lo que se quitó en la app).
+    const programasAfectados = Array.from(new Set<string | null>([
+      ...competencias.map(c => c.programaCodigo || null),
+      ...raps.map(r => r.programaCodigo || null),
+      ...compsSaneadas.map(c => c.programaCodigo || null),
+      ...rapsSaneados.map(r => r.programaCodigo || null)
+    ]));
+    sincronizarCatalogoEnSupabase(programasAfectados, compsSaneadas, rapsSaneados);
 
     if (nuevosRegistrosSeg && nuevosRegistrosSeg.length > 0) {
+      const progTarget = nuevosRegistrosSeg[0]?.programaCodigo;
       setRegistrosArchivoSeguimiento(prev => {
-        const progTarget = nuevosRegistrosSeg[0]?.programaCodigo;
         const otros = progTarget ? prev.filter(r => r.programaCodigo !== progTarget) : prev;
         return [...otros, ...nuevosRegistrosSeg];
       });
+      // El archivo REEMPLAZA completo lo del programa (igual que en memoria):
+      // primero se borra lo anterior de ese programa en Supabase y luego se
+      // sube el set nuevo, para no dejar filas huérfanas de un cargue previo.
+      (async () => {
+        if (progTarget) {
+          await deleteArchivoSeguimientoByProgramaFromSupabase(progTarget).catch(err => {
+            console.error('Error al limpiar registros previos del archivo de seguimiento en Supabase:', err);
+          });
+        }
+        bulkUpsertArchivoSeguimientoInSupabase(nuevosRegistrosSeg).catch(err => {
+          console.error('Error al sincronizar el archivo de seguimiento en Supabase:', err);
+        });
+      })();
     }
 
     // Auto-generar y enriquecer especialidades temáticas concisas desde las competencias
-    if (nuevasComp.length > 0) {
-      setEspecialidades(prevEsp => generarEspecialidadesDesdeCompetencias(nuevasComp, prevEsp));
+    if (compsSaneadas.length > 0) {
+      setEspecialidades(prevEsp => {
+        const nuevasEsp = generarEspecialidadesDesdeCompetencias(compsSaneadas, prevEsp);
+        nuevasEsp.forEach(esp => {
+          upsertEspecialidadInSupabase(esp).catch(err => {
+            console.error('Error al sincronizar especialidad temática en Supabase:', err);
+          });
+        });
+        return nuevasEsp;
+      });
     }
 
     registrarLog(
@@ -1311,16 +1911,22 @@ export default function App() {
     );
   };
 
-  // Manejo de Horas Ejecutadas por Instructor y Competencia.
-  // Reglas: (1) la ficha del archivo debe coincidir con la ficha seleccionada,
-  // si no se rechaza completo; (2) solo se aceptan horas de instructores que
-  // YA están asignados en esta ficha (Horarios o Seguimiento) — el resto se
-  // descarta con advertencia, nunca crea instructores nuevos; (3) cada cargue
-  // REEMPLAZA las horas previas de esta ficha (el archivo es progresivo, no
-  // sumativo); (4) no queda persistido el crudo del archivo.
-  const handleGuardarHorasEjecutadas = (nuevosRegistros: RegistroHorasEjecutadas[]): { exito: boolean; mensaje: string } => {
+  // Manejo del "Reporte de Instructores por Ficha" de SofiaPlus (horas por
+  // instructor y competencia). Reglas:
+  //  (1) la ficha del archivo debe coincidir con la ficha seleccionada;
+  //  (2) cada fila se empareja por NOMBRE de competencia contra el catálogo
+  //      del programa (el archivo no trae códigos; antes se comparaba el
+  //      nombre contra el código COMP-xx y nunca coincidía — por eso las
+  //      horas no aparecían en Seguimiento);
+  //  (3) nunca crea instructores: solo enriquece a los que ya existen;
+  //  (4) cada cargue REEMPLAZA las horas previas de esa ficha (el reporte es
+  //      acumulado) y se guarda en Supabase (horas_ejecutadas_ficha).
+  const handleGuardarHorasEjecutadas = (
+    nuevosRegistros: RegistroHorasEjecutadas[],
+    totalesSofia?: TotalesHorasSofia
+  ): { exito: boolean; mensaje: string } => {
     if (!selectedFicha) {
-      return { exito: false, mensaje: 'Selecciona una ficha antes de cargar el archivo de Horas Instructor Ficha.' };
+      return { exito: false, mensaje: 'Selecciona una ficha antes de cargar el Reporte de Instructores por Ficha.' };
     }
 
     const fichasEnArchivo = Array.from(new Set(nuevosRegistros.map(r => r.fichaNumero).filter((f): f is string => !!f)));
@@ -1334,45 +1940,91 @@ export default function App() {
       };
     }
 
-    // Instructores YA asignados en esta ficha, vía Horarios o vía Seguimiento
-    const normalizar = (s: string) => s.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
-    const asignadosEnFicha = new Set<string>();
-    horarios.filter(h => h.fichaId === selectedFicha.id && h.instructorNombre).forEach(h => asignadosEnFicha.add(normalizar(h.instructorNombre!)));
-    rapsSeguimiento.filter(s => (s.fichaId === selectedFicha.id || s.fichaNumero === selectedFicha.numero_ficha) && s.instructorNombre).forEach(s => asignadosEnFicha.add(normalizar(s.instructorNombre!)));
-
-    const registrosAceptados = nuevosRegistros.filter(r => r.instructorNombre && asignadosEnFicha.has(normalizar(r.instructorNombre)));
-    const registrosDescartados = nuevosRegistros.length - registrosAceptados.length;
-
-    if (registrosAceptados.length === 0) {
+    const catalogo = competencias
+      .filter(c => c.programaCodigo === selectedFicha.programaCodigo)
+      .map(c => ({ codigo: c.codigo, denominacion: c.denominacion }));
+    if (catalogo.length === 0) {
       return {
         exito: false,
-        mensaje: 'Ninguno de los instructores de este archivo está asignado todavía a esta ficha (en Horarios o Seguimiento). Asigna primero los instructores antes de cargar sus horas.'
+        mensaje: 'Esta ficha todavía no tiene competencias cargadas (Planeación Pedagógica). Carga primero ese archivo para el programa.'
+      };
+    }
+
+    const sinCatalogo = new Set<string>();
+    const registrosFicha: RegistroHorasEjecutadas[] = [];
+    nuevosRegistros.forEach(r => {
+      const texto = r.competenciaDenominacion && !r.competenciaDenominacion.startsWith('Competencia ')
+        ? r.competenciaDenominacion
+        : r.competenciaCodigo;
+      const { competencia } = matchCompetencia(texto || '', catalogo);
+      if (!competencia) {
+        sinCatalogo.add((texto || '').slice(0, 70));
+        return;
+      }
+      registrosFicha.push({
+        ...r,
+        id: esUuidValido(r.id) ? r.id : generarUuid(),
+        fichaNumero: selectedFicha.numero_ficha,
+        competenciaCodigo: competencia.codigo,
+        competenciaDenominacion: competencia.denominacion
+      });
+    });
+
+    if (registrosFicha.length === 0) {
+      return {
+        exito: false,
+        mensaje: 'Ninguna competencia del archivo coincide con el catálogo del programa de esta ficha.' +
+          (sinCatalogo.size > 0 ? ` Sin coincidencia: ${Array.from(sinCatalogo).join(' | ')}` : '')
       };
     }
 
     // Reemplaza (no suma) las horas previas de ESTA ficha
     setRegistrosHorasEjecutadas(prev => [
       ...prev.filter(r => r.fichaNumero !== selectedFicha.numero_ficha),
-      ...registrosAceptados
+      ...registrosFicha
     ]);
 
-    const sumFicha = registrosAceptados.reduce((acc, r) => acc + r.horasEjecutadas, 0);
-    setFichas(prevFichas => prevFichas.map(f => f.id === selectedFicha.id ? { ...f, horasEjecutadas: sumFicha } : f));
+    const sumArchivo = Math.round(registrosFicha.reduce((acc, r) => acc + r.horasEjecutadas, 0) * 10) / 10;
+    // Total ejecutado oficial de SofiaPlus (encabezado del reporte), si viene.
+    const horasEjecutadasFicha = Math.round(totalesSofia?.ejecutadas ?? sumArchivo);
+    setFichas(prevFichas => prevFichas.map(f => f.id === selectedFicha.id ? { ...f, horasEjecutadas: horasEjecutadasFicha } : f));
+    setSelectedFicha(prev => prev && prev.id === selectedFicha.id ? { ...prev, horasEjecutadas: horasEjecutadasFicha } : prev);
 
-    // Enriquecer perfil de instructores YA existentes (nunca crea nuevos aquí)
-    setInstructores(prevInst => caracterizarInstructoresDesdeHoras(registrosAceptados, prevInst));
+    // Instructores: se enriquecen los existentes y se CREAN los que no estén
+    // en la planta (igual que en Juicios Evaluativos), sin documento.
+    const { instructores: instructoresActualizados, nuevos: instructoresNuevos } =
+      crearOEnriquecerInstructoresDesdeHoras(registrosFicha, instructores);
+    setInstructores(instructoresActualizados);
+
+    // Guardar en Supabase (primero los instructores nuevos)
+    (async () => {
+      for (const inst of instructoresNuevos) {
+        const r = await insertInstructorInSupabase(inst);
+        if (!r.success) console.error(`No se pudo crear en Supabase el instructor ${inst.nombreCompleto}:`, r.error);
+      }
+      const r1 = await reemplazarHorasFichaEnSupabase(selectedFicha.numero_ficha, registrosFicha);
+      const r2 = await updateFichaInSupabase(selectedFicha.id, { horasEjecutadas: horasEjecutadasFicha });
+      const errores = [r1, r2].filter(r => !r.success).map(r => r.error);
+      if (errores.length > 0) {
+        console.error('Error al guardar horas en Supabase:', errores);
+        alert(`Las horas quedaron en pantalla, pero NO se guardaron en Supabase:\n\n${errores.join('\n')}\n\nSi el mensaje habla de la tabla horas_ejecutadas_ficha, corre en Supabase el script 20260929f_horas_y_resultados_juicios.sql.`);
+      }
+    })();
 
     registrarLog(
       'HORAS_EJECUTADAS_INGESTADAS',
       'Ingesta & Seguimiento',
-      `Cargadas ${sumFicha} horas ejecutadas para la ficha ${selectedFicha.numero_ficha} en ${registrosAceptados.length} registros (reemplazando el cargue anterior de esta ficha).` +
-      (registrosDescartados > 0 ? ` Se descartaron ${registrosDescartados} registro(s) de instructor(es) sin asignación previa en esta ficha.` : '')
+      `Reporte de Instructores por Ficha ${selectedFicha.numero_ficha}: ${registrosFicha.length} registros en ${new Set(registrosFicha.map(r => r.competenciaCodigo)).size} competencias` +
+      (totalesSofia ? ` (SofiaPlus: ${totalesSofia.programadas} h programadas, ${totalesSofia.ejecutadas} h ejecutadas, ${totalesSofia.pendientes} h pendientes).` : '.') +
+      (sinCatalogo.size > 0 ? ` Sin coincidencia en el catálogo: ${Array.from(sinCatalogo).join(' | ')}.` : '')
     );
 
     return {
       exito: true,
-      mensaje: `Se cargaron ${sumFicha} horas de ${registrosAceptados.length} registro(s) para la ficha ${selectedFicha.numero_ficha}, reemplazando el cargue anterior.` +
-        (registrosDescartados > 0 ? ` Se descartaron ${registrosDescartados} registro(s) porque el instructor no está asignado todavía a esta ficha.` : '')
+      mensaje: `Horas cargadas para la ficha ${selectedFicha.numero_ficha}: ${registrosFicha.length} registros en ${new Set(registrosFicha.map(r => r.competenciaCodigo)).size} competencias` +
+        (instructoresNuevos.length > 0 ? `. Se crearon ${instructoresNuevos.length} instructor(es) nuevo(s) en la planta` : '') +
+        (totalesSofia ? ` — SofiaPlus reporta ${Math.round(totalesSofia.ejecutadas)} h ejecutadas de ${Math.round(totalesSofia.programadas)} h programadas.` : '.') +
+        (sinCatalogo.size > 0 ? ` ⚠ ${sinCatalogo.size} competencia(s) sin coincidencia en el catálogo: ${Array.from(sinCatalogo).join(' | ')}` : '')
     };
   };
 
@@ -1427,7 +2079,22 @@ export default function App() {
     // 2) Emparejar cada (competencia, RAP) del archivo contra el catálogo
     // real y agregar, por RAP real, cuántos aprendices activos fueron
     // evaluados y cuántos de ellos tienen juicio APROBADO.
-    interface AgregadoRap { aprobadosActivos: number; rap: ResultadoAprendizaje }
+    interface AgregadoRap {
+      aprobadosActivos: number;
+      rap: ResultadoAprendizaje;
+      /** Quién registró los juicios de este RAP en SofiaPlus (nombre normalizado → nombre y conteo). */
+      evaluadores: Map<string, { nombre: string; veces: number }>;
+    }
+    const normalizarPersona = (t: string) => t.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Z ]/g, ' ').replace(/\s+/g, ' ').trim();
+    // SofiaPlus: "CC 12495918 - ALFREDO GARCIA MANDON" → "ALFREDO GARCIA MANDON"
+    // (el documento del funcionario no se guarda en ningún lado).
+    const nombreDeFuncionario = (f?: string) => {
+      const t = (f || '').trim();
+      if (!t || t === '-' || t.length < 5) return '';
+      const partes = t.split('-');
+      return (partes.length >= 2 ? partes.slice(1).join('-') : t.replace(/\d/g, '')).trim();
+    };
     const agregadoPorRap = new Map<string, AgregadoRap>();
     let contadorEtapaPractica = 0;
     let contadorSinMatch = 0;
@@ -1457,12 +2124,19 @@ export default function App() {
         if (!esActivo) return; // el 70% se calcula solo sobre aprendices activos
 
         if (!agregadoPorRap.has(rap.id)) {
-          agregadoPorRap.set(rap.id, { aprobadosActivos: 0, rap });
+          agregadoPorRap.set(rap.id, { aprobadosActivos: 0, rap, evaluadores: new Map() });
         }
         const agg = agregadoPorRap.get(rap.id)!;
         const estadoJuicio = (j.estado || '').toUpperCase();
         if (estadoJuicio.includes('APROBADO') && !estadoJuicio.includes('NO APROBADO')) {
           agg.aprobadosActivos += 1;
+        }
+        const nombreEval = nombreDeFuncionario(j.funcionarioEvaluador);
+        if (nombreEval) {
+          const k = normalizarPersona(nombreEval);
+          const e = agg.evaluadores.get(k) || { nombre: nombreEval, veces: 0 };
+          e.veces += 1;
+          agg.evaluadores.set(k, e);
         }
       });
     });
@@ -1470,15 +2144,55 @@ export default function App() {
     // 3) Solo los RAPs que alcanzan >=70% de aprobación sobre el TOTAL de
     // activos de la ficha pasan a CALIFICADO. Los demás se dejan exactamente
     // como estaban — como si el instructor no hubiese calificado.
+    // Instructor que calificó cada RAP según SofiaPlus: el funcionario que más
+    // juicios registró en ese RAP. Se busca en la planta de instructores
+    // (ignorando "Ing." y tildes). Solo se enlaza el id si el instructor ya
+    // existía antes de este cargue (así existe en Supabase); si no, se guarda
+    // solo el nombre.
+    const idsInstructoresPrevios = new Set(instructores.map(i => i.id));
+    const instructoresNuevosDeJuicios = resultadoInstructores.instructores.filter(i => !idsInstructoresPrevios.has(i.id));
+    const tokensDe = (t: string) => new Set(normalizarPersona(t).split(' ').filter(w => w.length > 1 && w !== 'ING'));
+    const buscarInstructor = (nombre: string): Instructor | undefined => {
+      const tn = tokensDe(nombre);
+      if (tn.size === 0) return undefined;
+      let mejor: Instructor | undefined;
+      let mejorPuntaje = 0;
+      for (const inst of resultadoInstructores.instructores) {
+        const ti = tokensDe(inst.nombreCompleto || `${inst.nombres} ${inst.apellidos}`);
+        let comunes = 0;
+        tn.forEach(w => { if (ti.has(w)) comunes += 1; });
+        const puntaje = comunes / Math.max(tn.size, ti.size);
+        if (puntaje > mejorPuntaje) { mejorPuntaje = puntaje; mejor = inst; }
+      }
+      return mejorPuntaje >= 0.75 ? mejor : undefined;
+    };
+    const evaluadorPrincipal = (agg: AgregadoRap) => {
+      let top: { nombre: string; veces: number } | undefined;
+      agg.evaluadores.forEach(e => { if (!top || e.veces > top.veces) top = e; });
+      if (!top) return undefined;
+      const inst = buscarInstructor(top.nombre);
+      return {
+        // Se enlaza el instructor encontrado (aunque sea nuevo): abajo se sube
+        // primero a Supabase, y si aun así no existe allá, el guardado del
+        // seguimiento se hace sin el enlace (ver upsertRapSeguimientoInSupabase).
+        instructorId: inst ? inst.id : undefined,
+        instructorNombre: inst ? inst.nombreCompleto : top.nombre
+      };
+    };
+
     let rapsCalificados = 0;
+    const seguimientoParaSupabase: RapSeguimiento[] = [];
     setRapsSeguimiento(prevSeg => {
       const nuevoSeg = [...prevSeg];
-      agregadoPorRap.forEach(({ aprobadosActivos, rap }) => {
+      seguimientoParaSupabase.length = 0;
+      agregadoPorRap.forEach((agg) => {
+        const { aprobadosActivos, rap } = agg;
         if (totalActivosFicha === 0) return;
         const pct = (aprobadosActivos / totalActivosFicha) * 100;
         if (pct < 70) return;
 
         rapsCalificados += 1;
+        const evaluador = evaluadorPrincipal(agg);
         const idx = nuevoSeg.findIndex(s =>
           (s.fichaId === ficha.id || s.fichaNumero === ficha.numero_ficha) &&
           s.competenciaCodigo === rap.competenciaCodigo &&
@@ -1486,16 +2200,35 @@ export default function App() {
         );
 
         if (idx >= 0) {
-          // El instructor asignado NUNCA se toca desde Juicios — solo el estado.
+          const actual = nuevoSeg[idx];
+          // Un instructor puesto a mano o desde Horarios se respeta. Solo se
+          // llena con quien calificó en SofiaPlus si el RAP no tenía
+          // instructor, o si el que tenía también venía de Juicios.
+          const tomarDeJuicios = !!evaluador && (
+            (!actual.instructorId && !actual.instructorNombre) || actual.fuenteInstructor === 'JUICIOS'
+          );
           nuevoSeg[idx] = {
-            ...nuevoSeg[idx],
+            ...actual,
+            ...(tomarDeJuicios ? {
+              instructorId: evaluador!.instructorId,
+              instructorNombre: evaluador!.instructorNombre,
+              fuenteInstructor: 'JUICIOS' as const
+            } : {}),
             estado: 'CALIFICADO',
             fuenteEstado: 'JUICIOS',
             fechaActualizacion: new Date().toISOString()
           };
+          seguimientoParaSupabase.push(nuevoSeg[idx]);
         } else {
           nuevoSeg.push({
-            id: `rap_seg_${ficha.id}_${rap.codigoRap}`,
+            ...(evaluador ? {
+              instructorId: evaluador.instructorId,
+              instructorNombre: evaluador.instructorNombre,
+              fuenteInstructor: 'JUICIOS' as const
+            } : {}),
+            // UUID real: raps_seguimiento.id es UUID en Supabase — un id con
+            // prefijo de texto hacía que el upsert lo rechazara por completo.
+            id: generarUuid(),
             fichaId: ficha.id,
             fichaNumero: ficha.numero_ficha,
             programaCodigo: ficha.programaCodigo,
@@ -1507,10 +2240,39 @@ export default function App() {
             fuenteEstado: 'JUICIOS',
             fechaActualizacion: new Date().toISOString()
           });
+          seguimientoParaSupabase.push(nuevoSeg[nuevoSeg.length - 1]);
         }
       });
       return nuevoSeg;
     });
+
+    // Antes lo que marcaba Juicios (CALIFICADO) quedaba solo en este
+    // navegador. Ahora se sube a Supabase (tabla raps_seguimiento).
+    setTimeout(() => {
+      (async () => {
+        // 1) Primero los instructores detectados en este archivo que no
+        //    existían: sin esto, el seguimiento que los referencia no podía
+        //    guardarse (llave foránea a `instructores`).
+        for (const inst of instructoresNuevosDeJuicios) {
+          const r = await insertInstructorInSupabase(inst);
+          if (!r.success) console.error(`No se pudo subir a Supabase el instructor ${inst.nombreCompleto}:`, r.error);
+        }
+        // 2) Luego el seguimiento por RAP.
+        let primerError = '';
+        let fallidos = 0;
+        for (const item of seguimientoParaSupabase) {
+          const res = await upsertRapSeguimientoInSupabase(item);
+          if (!res.success) {
+            fallidos += 1;
+            if (!primerError) primerError = res.error || '';
+            console.error('Error al guardar seguimiento de RAP (desde Juicios) en Supabase:', res.error);
+          }
+        }
+        if (fallidos > 0) {
+          alert(`${fallidos} de ${seguimientoParaSupabase.length} RAPs calificados desde Juicios no se pudieron guardar en Supabase:\n\n${primerError}`);
+        }
+      })();
+    }, 0);
 
     // 4) Recalcular retención/deserción desde los estados reales de
     // matrícula de este cargue (aplazado, cancelado, retiro voluntario,
@@ -1546,6 +2308,22 @@ export default function App() {
       };
     }));
 
+    // Antes estos indicadores solo quedaban en este navegador (y al abrir la
+    // app se reiniciaban a 100% / 0%). Ahora se guardan en Supabase.
+    updateFichaInSupabase(ficha.id, {
+      aprendicesActivos: activosCount,
+      aprendicesRetiroVoluntario: retiroVolCount,
+      aprendicesCancelados: canceladosCount,
+      aprendicesAplazados: aplazadosCount,
+      aprendicesCondicionados: condicionadosCount,
+      aprendicesTrasladados: trasladadosCount,
+      tasaRetencion: retencion,
+      tasaDesercion: desercion,
+      progresoCurricular: reporte.porcentajeAprobacionFicha
+    }).then(res => {
+      if (!res.success) console.error('Error al guardar los indicadores de Juicios de la ficha en Supabase:', res.error);
+    });
+
     // Se conserva en memoria (sesión) solo para el detalle de "último cargue" —
     // no se persiste en localStorage ni se usa como fuente de verdad.
     setReportesJuicios(prev => ({ ...prev, [reporte.fichaNumero]: reporte }));
@@ -1579,6 +2357,15 @@ export default function App() {
     localStorage.setItem('sena_competencias', JSON.stringify([]));
     localStorage.setItem('sena_raps', JSON.stringify([]));
     localStorage.setItem('sena_archivo_seguimiento_registros', JSON.stringify([]));
+    deleteAllCompetenciasFromSupabase().catch(err => {
+      console.error('Error al limpiar competencias en Supabase:', err);
+    });
+    deleteAllRapsFromSupabase().catch(err => {
+      console.error('Error al limpiar RAPs en Supabase:', err);
+    });
+    deleteAllArchivoSeguimientoFromSupabase().catch(err => {
+      console.error('Error al limpiar el archivo de seguimiento en Supabase:', err);
+    });
     registrarLog(
       'ESTRUCTURA_LIMPIADA',
       'Competencias & RAPs',
@@ -1691,9 +2478,21 @@ export default function App() {
     const bloque: BloqueHorario = {
       ...nuevoBloque,
       vacante: !nuevoBloque.instructorId,
-      id: `blq_${Date.now()}`
+      // UUID real (no `blq_<timestamp>`): la tabla bloques_horarios en
+      // Supabase usa id UUID, y con un id no-UUID el insert fallaba en
+      // silencio (atrapado por el .catch() de abajo) — el bloque se
+      // guardaba en memoria/localStorage pero nunca llegaba a Supabase.
+      id: generarUuid()
     };
     setHorarios(prev => [...prev, bloque]);
+    insertHorarioInSupabase(bloque).then(res => {
+      if (!res.success) {
+        console.error('Error al guardar bloque de horario en Supabase:', res.error);
+        alert(`El bloque quedó en pantalla, pero NO se guardó en Supabase:\n\n${res.error}`);
+      }
+    }).catch(err => {
+      console.error('Error al guardar bloque de horario en Supabase:', err);
+    });
 
     // Incrementar horas asignadas al instructor (si el bloque quedó vacante,
     // no hay a quién incrementarle horas todavía).
@@ -1746,6 +2545,14 @@ export default function App() {
     };
     setHorarios(prev => prev.map(b => b.id === bloqueId ? bloqueVacante : b));
     sincronizarSeguimientoDesdeBloque(bloqueVacante);
+    updateHorarioInSupabase(bloqueVacante).then(res => {
+      if (!res.success) {
+        console.error('Error al marcar bloque vacante en Supabase:', res.error);
+        alert(`El cambio quedó en pantalla, pero NO se guardó en Supabase:\n\n${res.error}`);
+      }
+    }).catch(err => {
+      console.error('Error al marcar bloque vacante en Supabase:', err);
+    });
 
     const numFicha = selectedFicha ? selectedFicha.numero_ficha : 'N/A';
     registrarLog(
@@ -1775,6 +2582,14 @@ export default function App() {
     };
     setHorarios(prev => prev.map(b => b.id === bloqueId ? bloqueActualizado : b));
     sincronizarSeguimientoDesdeBloque(bloqueActualizado);
+    updateHorarioInSupabase(bloqueActualizado).then(res => {
+      if (!res.success) {
+        console.error('Error al asignar instructor a bloque en Supabase:', res.error);
+        alert(`La asignación quedó en pantalla, pero NO se guardó en Supabase:\n\n${res.error}`);
+      }
+    }).catch(err => {
+      console.error('Error al asignar instructor a bloque en Supabase:', err);
+    });
 
     const numFicha = selectedFicha ? selectedFicha.numero_ficha : 'N/A';
     registrarLog(
@@ -1882,6 +2697,11 @@ export default function App() {
     }
 
     setHorarios(prev => prev.filter(b => b.id !== bloqueId));
+    deleteHorarioFromSupabase(bloqueId).then(res => {
+      if (!res.success) console.error('Error al eliminar bloque de horario en Supabase:', res.error);
+    }).catch(err => {
+      console.error('Error al eliminar bloque de horario en Supabase:', err);
+    });
     const numFicha = selectedFicha ? selectedFicha.numero_ficha : 'N/A';
     registrarLog('LIBERACION_BLOQUE_HORARIO', 'Programación de Horarios', `Bloque liberado en Ficha ${numFicha}`);
   };
@@ -1972,9 +2792,12 @@ export default function App() {
     };
 
     setAuditoriaIngestas(prev => [nuevaAuditoria, ...prev]);
+    insertAuditoriaIngestaInSupabase(nuevaAuditoria).catch(err => {
+      console.error('Error al registrar la ingesta en Supabase:', err);
+    });
     registrarLog(
-      'INGESTA_EXCEL_EXITOSA', 
-      'Ingesta de Archivos Excel', 
+      'INGESTA_EXCEL_EXITOSA',
+      'Ingesta de Archivos Excel',
       `Archivo ${archivoNombre} procesado (${filas} filas) por ${currentUser.nombre_completo}`
     );
   };
@@ -2203,6 +3026,8 @@ export default function App() {
               }}
               onSelectFicha={setSelectedFicha}
               onNavigateToReportesInstructores={() => setActiveTab('reportes')}
+              registrosHorasEjecutadas={registrosHorasEjecutadas}
+              actividades={actividades}
             />
           )}
 
@@ -2357,6 +3182,8 @@ export default function App() {
               onLimpiarDatabase={handleLimpiarDatabase}
               onCrearUsuario={handleCrearUsuario}
               onEliminarUsuario={handleEliminarUsuario}
+              onEditarClaveUsuario={handleEditarClaveUsuario}
+              onEditarCorreoUsuario={handleEditarCorreoUsuario}
             />
           )}
         </main>

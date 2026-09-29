@@ -121,10 +121,10 @@ CREATE TYPE sena_franja_horario AS ENUM ('06:00 - 09:00', '09:00 - 12:00', '13:0
 -- 3. TABLA CENTRO DE FORMACIÓN
 CREATE TABLE public.centros_formacion (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    regional VARCHAR(100) NOT NULL DEFAULT 'Regional Cesar',
-    centro VARCHAR(200) NOT NULL DEFAULT 'Centro Biotecnológico del Caribe',
-    codigo_centro VARCHAR(20) NOT NULL DEFAULT '9513',
-    sede VARCHAR(150) NOT NULL DEFAULT 'Sede Principal - Km 7 Vía a la Paz',
+    regional VARCHAR(100) NOT NULL DEFAULT 'Regional',
+    centro VARCHAR(200) NOT NULL DEFAULT 'Centro de Formación',
+    codigo_centro VARCHAR(20) NOT NULL DEFAULT '0000',
+    sede VARCHAR(150) NOT NULL DEFAULT 'Sede Principal',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -237,7 +237,7 @@ CREATE TABLE IF NOT EXISTS public.ambientes (
     nombre VARCHAR(150) NOT NULL,
     codigo VARCHAR(50) NOT NULL UNIQUE,
     tipo VARCHAR(50) NOT NULL DEFAULT 'Ambiente TIC',
-    sede VARCHAR(150) NOT NULL DEFAULT 'Sede Principal - Valledupar',
+    sede VARCHAR(150) NOT NULL DEFAULT 'Sede Principal',
     capacidad_aprendices INTEGER NOT NULL DEFAULT 30,
     equipamiento TEXT,
     estado VARCHAR(30) NOT NULL DEFAULT 'DISPONIBLE',
@@ -300,18 +300,17 @@ CREATE TABLE public.auditoria_sistema (
 );`;
 
   const seedSql = `-- =====================================================================
--- DATOS SEMILLA (SEED DATA) REALES - SENA REGIONAL CESAR
--- Centro Biotecnológico del Caribe (CBC)
+-- DATOS SEMILLA (SEED DATA) DE EJEMPLO
 -- =====================================================================
 
 -- 1. CENTRO DE FORMACIÓN
 INSERT INTO public.centros_formacion (id, regional, centro, codigo_centro, sede)
 VALUES (
     'c0000000-0000-0000-0000-000000000001',
-    'Regional Cesar',
-    'Centro Biotecnológico del Caribe',
-    '9513',
-    'Sede Principal - Kilómetro 7 Vía a la Paz, Valledupar'
+    'Regional',
+    'Centro de Formación',
+    '0000',
+    'Sede Principal'
 ) ON CONFLICT (id) DO NOTHING;
 
 -- 2. INSTRUCTORES DE PLANTA
@@ -322,7 +321,7 @@ VALUES
     '77189201',
     'Carlos Alberto',
     'Mendoza Romero',
-    'carlos.mendoza@misena.edu.co',
+    'carlos.mendoza@correo.edu.co',
     '3157891234',
     'Ingeniero de Sistemas, Especialista en Seguridad Informática',
     'Desarrollo de Software & Cloud',
@@ -335,7 +334,7 @@ VALUES
     '49782103',
     'Laura Patricia',
     'Gómez Silva',
-    'laura.gomez@misena.edu.co',
+    'laura.gomez@correo.edu.co',
     '3168902345',
     'Magíster en Gestión de Proyectos de Software, PMP',
     'Metodologías Ágiles & Calidad',
@@ -348,7 +347,7 @@ VALUES
     '1065892114',
     'Jorge Eliécer',
     'Vega Castro',
-    'jorge.vega@misena.edu.co',
+    'jorge.vega@correo.edu.co',
     '3189013456',
     'Ingeniero Electrónico, Administrador Certificado AWS & Azure',
     'Arquitectura Cloud & DevOps',
@@ -361,7 +360,7 @@ VALUES
     '1065993821',
     'María Alejandra',
     'Pérez Nieto',
-    'maria.perez@misena.edu.co',
+    'maria.perez@correo.edu.co',
     '3201234567',
     'Licenciada en Filología e Idiomas, Certificación C1 Cambridge',
     'Bilingüismo & Technical English',
@@ -376,7 +375,7 @@ VALUES
 (
     'e0000000-0000-0000-0000-000000000001',
     '77100200',
-    'coordinacion.cbc@sena.edu.co',
+    'coordinacion@correo.edu.co',
     'Ing. Claudia Patricia Restrepo',
     'COORDINADOR',
     'Coordinadora Académica de Formación Titulada',
@@ -385,7 +384,7 @@ VALUES
 (
     'e0000000-0000-0000-0000-000000000002',
     '1065778899',
-    'auxiliar.operativo@sena.edu.co',
+    'auxiliar.operativo@correo.edu.co',
     'Andrés Felipe Cañas',
     'AUXILIAR',
     'Auxiliar Operativo de Gestión Académica',
@@ -394,7 +393,7 @@ VALUES
 (
     'e0000000-0000-0000-0000-000000000003',
     '77189201',
-    'carlos.mendoza@misena.edu.co',
+    'carlos.mendoza@correo.edu.co',
     'Ing. Carlos Alberto Mendoza',
     'INSTRUCTOR_LIDER',
     'Instructor Líder de Ficha 2694123',
@@ -403,8 +402,8 @@ VALUES
 (
     'e0000000-0000-0000-0000-000000000004',
     '12345678',
-    'admin.sistema@sena.edu.co',
-    'Administrador SENA TIC',
+    'admin.sistema@correo.edu.co',
+    'Administrador de Sistema TIC',
     'ADMINISTRADOR',
     'Administrador del Sistema y Mesa de Soporte',
     'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80'
@@ -428,7 +427,7 @@ INSERT INTO public.fichas (
     'Tecnólogo',
     'a0000000-0000-0000-0000-000000000001',
     'Presencial Diurna',
-    'Ambiente 204 - TIC / Software CBC',
+    'Ambiente 204 - TIC / Software',
     '2026-III (Julio - Septiembre)',
     '2026-07-01',
     '2027-12-15',
@@ -587,7 +586,7 @@ INSERT INTO public.bloques_horarios (
     'a0000000-0000-0000-0000-000000000001',
     'Lunes',
     '06:00 - 09:00',
-    'Ambiente 204 - TIC / Software CBC',
+    'Ambiente 204 - TIC / Software',
     'RAP 03',
     'Construcción de API RESTful con JWT',
     '220501096',
@@ -602,7 +601,7 @@ INSERT INTO public.bloques_horarios (
     'a0000000-0000-0000-0000-000000000002',
     'Martes',
     '09:00 - 12:00',
-    'Ambiente 204 - TIC / Software CBC',
+    'Ambiente 204 - TIC / Software',
     'RAP 01',
     'Requisitos y Diagramas UML',
     '220501092',
@@ -617,7 +616,7 @@ INSERT INTO public.bloques_horarios (
     'a0000000-0000-0000-0000-000000000004',
     'Jueves',
     '06:00 - 09:00',
-    'Ambiente 204 - TIC / Software CBC',
+    'Ambiente 204 - TIC / Software',
     'RAP 05',
     'Technical English for Developers',
     '240202501',
@@ -651,7 +650,7 @@ VALUES
     '1065892001',
     'CC',
     'Juan David Montero Rangel',
-    'jd.montero@misena.edu.co',
+    'jd.montero@correo.edu.co',
     'EN FORMACION'
 ),
 (
@@ -660,7 +659,7 @@ VALUES
     '1065892002',
     'CC',
     'Camila Andrea Quintero Soto',
-    'ca.quintero@misena.edu.co',
+    'ca.quintero@correo.edu.co',
     'EN FORMACION'
 ) ON CONFLICT (id) DO NOTHING;
 
@@ -1024,7 +1023,7 @@ ALTER TABLE public.auditoria_sistema DISABLE ROW LEVEL SECURITY;`,
               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-emerald-900">
                 <div className="font-bold flex items-center space-x-2 mb-1">
                   <ShieldCheck className="w-5 h-5 text-[#0D631B]" />
-                  <span>Configuración en 5 Minutos para el Centro Biotecnológico del Caribe (SENA)</span>
+                  <span>Configuración en 5 Minutos para tu Centro de Formación</span>
                 </div>
                 <p className="text-xs text-emerald-800">
                   Supabase te provee un motor PostgreSQL 15 nativo en la nube con soporte de Row Level Security (RLS), autenticación de usuarios y API RESTful automática sin escribir backend adicional.
@@ -1042,7 +1041,7 @@ ALTER TABLE public.auditoria_sistema DISABLE ROW LEVEL SECURITY;`,
                       Entra a <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-[#0D631B] underline font-semibold">supabase.com</a>, inicia sesión con GitHub o email y haz clic en <strong>"New Project"</strong>.
                     </p>
                     <div className="text-xs bg-slate-100 p-2 rounded-lg font-mono text-slate-700">
-                      Name: sena-gestion-academica-cbc | Region: South America (São Paulo) o East US
+                      Name: gestion-academica | Region: South America (São Paulo) o East US
                     </div>
                   </div>
                 </div>
@@ -1086,7 +1085,7 @@ ALTER TABLE public.auditoria_sistema DISABLE ROW LEVEL SECURITY;`,
                   </div>
                   <div className="space-y-2 flex-1">
                     <div className="flex items-center justify-between">
-                      <h4 className="font-bold text-[#111C2D]">Ejecuta los Datos Semilla (Seed Inicial SENA)</h4>
+                      <h4 className="font-bold text-[#111C2D]">Ejecuta los Datos Semilla (Seed Inicial)</h4>
                       <button
                         onClick={() => handleCopy(seedSql, 'step4')}
                         className="flex items-center space-x-1 text-xs bg-[#EDE7F6] text-[#6F43C0] hover:bg-[#ded4f0] px-2.5 py-1 rounded-lg font-bold border border-[#D3BBFF] transition-colors"
@@ -1175,7 +1174,7 @@ ALTER TABLE public.auditoria_sistema DISABLE ROW LEVEL SECURITY;`,
             <div className="space-y-6">
               <div>
                 <h3 className="font-bold text-[#111C2D] mb-1">Diccionario de Tablas y Ejemplos de Datos Reales</h3>
-                <p className="text-xs text-slate-500">Estructura normalizada y relaciones bajo el estándar del Modelo Pedagógico SENA.</p>
+                <p className="text-xs text-slate-500">Estructura normalizada y relaciones bajo el estándar del Modelo Pedagógico institucional.</p>
               </div>
 
               {/* Tabla Fichas */}
@@ -1246,7 +1245,7 @@ ALTER TABLE public.auditoria_sistema DISABLE ROW LEVEL SECURITY;`,
                       <tr>
                         <td className="p-2.5">77189201</td>
                         <td className="p-2.5 font-sans font-bold text-[#111C2D]">Carlos Alberto Mendoza Romero</td>
-                        <td className="p-2.5 text-slate-500">carlos.mendoza@misena.edu.co</td>
+                        <td className="p-2.5 text-slate-500">carlos.mendoza@correo.edu.co</td>
                         <td className="p-2.5 font-sans">Desarrollo de Software & Cloud</td>
                         <td className="p-2.5 font-bold">32 hrs</td>
                         <td className="p-2.5"><span className="px-2 py-0.5 rounded bg-emerald-100 text-[#0D631B] font-bold">ACTIVO</span></td>
@@ -1254,7 +1253,7 @@ ALTER TABLE public.auditoria_sistema DISABLE ROW LEVEL SECURITY;`,
                       <tr>
                         <td className="p-2.5">49782103</td>
                         <td className="p-2.5 font-sans font-bold text-[#111C2D]">Laura Patricia Gómez Silva</td>
-                        <td className="p-2.5 text-slate-500">laura.gomez@misena.edu.co</td>
+                        <td className="p-2.5 text-slate-500">laura.gomez@correo.edu.co</td>
                         <td className="p-2.5 font-sans">Metodologías Ágiles & Calidad</td>
                         <td className="p-2.5 font-bold">32 hrs</td>
                         <td className="p-2.5"><span className="px-2 py-0.5 rounded bg-emerald-100 text-[#0D631B] font-bold">ACTIVO</span></td>
@@ -1286,7 +1285,7 @@ ALTER TABLE public.auditoria_sistema DISABLE ROW LEVEL SECURITY;`,
                       <tr>
                         <td className="p-2.5 font-bold">Lunes</td>
                         <td className="p-2.5 text-[#005A8C] font-bold">06:00 - 09:00</td>
-                        <td className="p-2.5 font-sans">Ambiente 204 - TIC CBC</td>
+                        <td className="p-2.5 font-sans">Ambiente 204 - TIC</td>
                         <td className="p-2.5 text-slate-500">a000...001 (Carlos Mendoza)</td>
                         <td className="p-2.5 font-bold text-[#0D631B]">RAP 03</td>
                         <td className="p-2.5 font-bold">3 hrs</td>
@@ -1294,7 +1293,7 @@ ALTER TABLE public.auditoria_sistema DISABLE ROW LEVEL SECURITY;`,
                       <tr>
                         <td className="p-2.5 font-bold">Martes</td>
                         <td className="p-2.5 text-[#005A8C] font-bold">09:00 - 12:00</td>
-                        <td className="p-2.5 font-sans">Ambiente 204 - TIC CBC</td>
+                        <td className="p-2.5 font-sans">Ambiente 204 - TIC</td>
                         <td className="p-2.5 text-slate-500">a000...002 (Laura Gómez)</td>
                         <td className="p-2.5 font-bold text-[#0D631B]">RAP 01</td>
                         <td className="p-2.5 font-bold">3 hrs</td>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { 
   FileSpreadsheet, 
   CheckCircle2, 
@@ -341,7 +342,7 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            <span className="px-2 py-0.5 rounded bg-[#E8F5E9] text-[#2E7D32]">Formación Titulada SENA</span>
+            <span className="px-2 py-0.5 rounded bg-[#E8F5E9] text-[#2E7D32]">Formación Titulada</span>
             <span>•</span>
             <span>Seguimiento Curricular & Horas</span>
             <span>•</span>
@@ -353,7 +354,7 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
             Seguimiento: Planeado vs Ejecutado & RAPs
           </h1>
           <p className="text-xs text-slate-500 font-medium">
-            Ficha <strong>{ficha.numero_ficha} — {ficha.programaNombre}</strong> ({ficha.modalidad} • Centro Biotecnológico del Caribe)
+            Ficha <strong>{ficha.numero_ficha} — {ficha.programaNombre}</strong> ({ficha.modalidad})
           </p>
         </div>
 
@@ -1351,39 +1352,135 @@ interface InstructorSearchSelectProps {
 const InstructorSearchSelect: React.FC<InstructorSearchSelectProps> = ({ instructores, selectedId, customLabel, onChange }) => {
   const [abierto, setAbierto] = React.useState(false);
   const [busqueda, setBusqueda] = React.useState('');
-  const contenedorRef = React.useRef<HTMLDivElement>(null);
+  const botonRef = React.useRef<HTMLButtonElement>(null);
+  const panelRef = React.useRef<HTMLDivElement>(null);
+  // El panel se dibuja en <body> con posición fija (portal). Antes vivía
+  // dentro de la tabla, que tiene scroll horizontal (overflow-x-auto): eso
+  // recortaba todo lo que quedaba debajo del buscador, así que la lista de
+  // instructores existía pero nunca se veía.
+  const [posicion, setPosicion] = React.useState<{ top: number; left: number; abreArriba: boolean } | null>(null);
+
+  const ANCHO_PANEL = 288;
+  const ALTO_PANEL = 280;
+
+  const calcularPosicion = React.useCallback(() => {
+    const btn = botonRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    const abreArriba = window.innerHeight - r.bottom < ALTO_PANEL && r.top > ALTO_PANEL;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - ANCHO_PANEL - 8));
+    setPosicion({ top: abreArriba ? r.top - 4 : r.bottom + 4, left, abreArriba });
+  }, []);
+
+  const cerrar = React.useCallback(() => {
+    setAbierto(false);
+    setBusqueda('');
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (!abierto) return;
+    calcularPosicion();
+    const alMoverse = () => calcularPosicion();
+    window.addEventListener('scroll', alMoverse, true);
+    window.addEventListener('resize', alMoverse);
+    const handleClickFuera = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (botonRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      cerrar();
+    };
+    const handleEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') cerrar(); };
+    document.addEventListener('mousedown', handleClickFuera);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('scroll', alMoverse, true);
+      window.removeEventListener('resize', alMoverse);
+      document.removeEventListener('mousedown', handleClickFuera);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [abierto, calcularPosicion, cerrar]);
 
   const seleccionado = instructores.find(i => i.id === selectedId);
   const etiquetaActual = seleccionado
     ? `${seleccionado.nombreCompleto}${seleccionado.especialidad ? ` (${seleccionado.especialidad})` : ''}`
     : customLabel || '';
 
-  React.useEffect(() => {
-    if (!abierto) return;
-    const handleClickFuera = (e: MouseEvent) => {
-      if (contenedorRef.current && !contenedorRef.current.contains(e.target as Node)) {
-        setAbierto(false);
-        setBusqueda('');
-      }
-    };
-    document.addEventListener('mousedown', handleClickFuera);
-    return () => document.removeEventListener('mousedown', handleClickFuera);
-  }, [abierto]);
-
   const filtrados = React.useMemo(() => {
     const txt = busqueda.trim().toLowerCase();
-    if (!txt) return instructores;
-    return instructores.filter(i =>
+    const base = [...instructores].sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto));
+    if (!txt) return base;
+    return base.filter(i =>
       i.nombreCompleto.toLowerCase().includes(txt) ||
       (i.especialidad && i.especialidad.toLowerCase().includes(txt))
     );
   }, [instructores, busqueda]);
 
+  const panel = abierto && posicion ? (
+    <div
+      ref={panelRef}
+      style={{
+        position: 'fixed',
+        left: posicion.left,
+        width: ANCHO_PANEL,
+        ...(posicion.abreArriba ? { bottom: window.innerHeight - posicion.top } : { top: posicion.top })
+      }}
+      className="z-[100] bg-white rounded-xl border border-slate-200 shadow-xl p-1.5 space-y-1"
+    >
+      <div className="relative">
+        <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          autoFocus
+          type="text"
+          value={busqueda}
+          onChange={e => setBusqueda(e.target.value)}
+          placeholder="Buscar por nombre o especialidad..."
+          className="w-full pl-6 pr-2 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D631B]"
+        />
+      </div>
+      <div className="max-h-56 overflow-y-auto">
+        <button
+          type="button"
+          onClick={() => { onChange(''); cerrar(); }}
+          className="w-full text-left px-2 py-1.5 text-[11px] text-slate-500 rounded-lg hover:bg-slate-50"
+        >
+          -- Sin Instructor Asignado --
+        </button>
+        {instructores.length === 0 ? (
+          <div className="px-2 py-2 text-[11px] text-amber-700 bg-amber-50 rounded-lg">
+            No hay instructores registrados. Créalos en el módulo Instructores.
+          </div>
+        ) : filtrados.length === 0 ? (
+          <div className="px-2 py-2 text-[11px] text-slate-400 text-center">Sin resultados para "{busqueda}"</div>
+        ) : (
+          filtrados.map(inst => (
+            <button
+              key={inst.id}
+              type="button"
+              onClick={() => { onChange(inst.id); cerrar(); }}
+              className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-[#E8F5E9] ${
+                inst.id === selectedId ? 'bg-[#E8F5E9] font-bold text-[#0D631B]' : 'text-slate-700'
+              }`}
+            >
+              <span className="block truncate">{inst.nombreCompleto}</span>
+              {inst.especialidad && <span className="block text-[10px] text-slate-500 truncate">{inst.especialidad}</span>}
+            </button>
+          ))
+        )}
+        {customLabel && !seleccionado && (
+          <div className="px-2 py-1.5 text-[10px] text-slate-400 italic border-t border-slate-100 mt-1 pt-1.5">
+            Actual (fuera del catálogo): {customLabel}
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   return (
-    <div className="relative" ref={contenedorRef}>
+    <div className="relative">
       <button
+        ref={botonRef}
         type="button"
-        onClick={() => setAbierto(prev => !prev)}
+        onClick={() => (abierto ? cerrar() : setAbierto(true))}
+        aria-expanded={abierto}
         className={`w-full flex items-center justify-between space-x-1 text-xs font-semibold py-1.5 px-2.5 rounded-xl border transition-all text-left ${
           seleccionado
             ? 'bg-emerald-50/60 text-emerald-950 border-emerald-300'
@@ -1393,52 +1490,7 @@ const InstructorSearchSelect: React.FC<InstructorSearchSelectProps> = ({ instruc
         <span className="truncate">{etiquetaActual || '-- Sin Instructor Asignado --'}</span>
         <Search className="w-3 h-3 shrink-0 opacity-60" />
       </button>
-
-      {abierto && (
-        <div className="absolute z-20 mt-1 w-64 bg-white rounded-xl border border-slate-200 shadow-lg p-1.5 space-y-1">
-          <div className="relative">
-            <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              autoFocus
-              type="text"
-              value={busqueda}
-              onChange={e => setBusqueda(e.target.value)}
-              placeholder="Buscar por nombre o especialidad..."
-              className="w-full pl-6 pr-2 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D631B]"
-            />
-          </div>
-          <div className="max-h-48 overflow-y-auto">
-            <button
-              type="button"
-              onClick={() => { onChange(''); setAbierto(false); setBusqueda(''); }}
-              className="w-full text-left px-2 py-1.5 text-[11px] text-slate-500 rounded-lg hover:bg-slate-50"
-            >
-              -- Sin Instructor Asignado --
-            </button>
-            {filtrados.length === 0 ? (
-              <div className="px-2 py-2 text-[11px] text-slate-400 text-center">Sin resultados</div>
-            ) : (
-              filtrados.map(inst => (
-                <button
-                  key={inst.id}
-                  type="button"
-                  onClick={() => { onChange(inst.id); setAbierto(false); setBusqueda(''); }}
-                  className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-[#E8F5E9] ${
-                    inst.id === selectedId ? 'bg-[#E8F5E9] font-bold text-[#0D631B]' : 'text-slate-700'
-                  }`}
-                >
-                  {inst.nombreCompleto}{inst.especialidad ? ` (${inst.especialidad})` : ''}
-                </button>
-              ))
-            )}
-            {customLabel && !seleccionado && (
-              <div className="px-2 py-1.5 text-[10px] text-slate-400 italic border-t border-slate-100 mt-1 pt-1.5">
-                Actual (fuera del catálogo): {customLabel}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {panel && createPortal(panel, document.body)}
     </div>
   );
 };

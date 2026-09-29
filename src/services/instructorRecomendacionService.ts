@@ -1,4 +1,5 @@
 import { Instructor, Competencia, ResultadoAprendizaje, ReporteJuiciosFicha, RegistroHorasEjecutadas, HistorialEvaluacionInstructor } from '../types';
+import { generarUuid } from '../lib/id';
 
 export type NivelAfinidad = 
   | 'ALTA_HISTORIAL_RAP' 
@@ -90,7 +91,7 @@ function inferirEspecialidadPorCompetencia(competenciaDenom: string): { perfilTe
 
   return {
     perfilTecnico: 'Instructor de Formación Profesional Integral',
-    especialidad: 'Formación Profesional SENA'
+    especialidad: 'Formación Profesional'
   };
 }
 
@@ -296,18 +297,25 @@ export function caracterizarInstructoresDesdeJuicios(
 
       const nombresParts = data.nombreCompleto.split(' ');
       const nombres = nombresParts.slice(0, Math.ceil(nombresParts.length / 2)).join(' ');
-      const apellidos = nombresParts.slice(Math.ceil(nombresParts.length / 2)).join(' ') || 'SENA';
+      const apellidos = nombresParts.slice(Math.ceil(nombresParts.length / 2)).join(' ') || '';
 
       const colorIndex = resultado.length % COLORES_AVATAR.length;
       const nuevoInstructor: Instructor = {
-        id: `inst_sofia_${Date.now()}_${resultado.length}`,
+        // UUID real: instructores.id es UUID en Supabase. NOTA: este
+        // instructor auto-detectado desde Juicios NO se sincroniza a
+        // Supabase todavía en ningún punto del código (queda solo en
+        // memoria/localStorage) — eso es un vacío aparte de la corrección de
+        // id, pendiente de resolver (requiere además decidir qué guardar en
+        // `documento`, que en Supabase es UNIQUE NOT NULL y aquí siempre
+        // llega vacío).
+        id: generarUuid(),
         // Sin número de documento: este sistema no maneja identificación
         // personal de los instructores auto-detectados desde Juicios.
         documento: '',
         nombres,
         apellidos,
         nombreCompleto: data.nombreCompleto,
-        email: `${nombresParts[0]?.toLowerCase() || 'instructor'}.${apellidos.split(' ')[0]?.toLowerCase() || 'sena'}@misena.edu.co`,
+        email: `${nombresParts[0]?.toLowerCase() || 'instructor'}.${apellidos.split(' ')[0]?.toLowerCase() || 'sena'}@correo.edu.co`,
         perfilTecnico,
         especialidad,
         colorAvatar: COLORES_AVATAR[colorIndex],
@@ -596,4 +604,85 @@ export function evaluarAfinidadInstructor(
     detalleJuicios,
     motivoAdvertencia
   };
+}
+
+
+/**
+ * Para el "Reporte de Instructores por Ficha" (horas): empareja cada
+ * instructor del archivo con la planta (sin importar "Ing.", tildes ni
+ * mayúsculas) y CREA los que no existan — igual que el cargue de Juicios —
+ * sin documento (dato personal que no se maneja). También enriquece la
+ * experiencia por competencia de todos.
+ */
+export function crearOEnriquecerInstructoresDesdeHoras(
+  registros: RegistroHorasEjecutadas[],
+  instructoresActuales: Instructor[]
+): { instructores: Instructor[]; nuevos: Instructor[] } {
+  const resultado = [...instructoresActuales];
+  const nuevos: Instructor[] = [];
+  const tokens = (t: string) => new Set(normalizarNombrePersona(t).split(' ').filter(w => w.length > 1 && w !== 'ING'));
+  const buscar = (nombre: string): number => {
+    const tn = tokens(nombre);
+    if (tn.size === 0) return -1;
+    let mejor = -1;
+    let mejorPuntaje = 0;
+    resultado.forEach((inst, idx) => {
+      const ti = tokens(inst.nombreCompleto || `${inst.nombres} ${inst.apellidos}`);
+      let comunes = 0;
+      tn.forEach(w => { if (ti.has(w)) comunes += 1; });
+      const puntaje = comunes / Math.max(tn.size, ti.size);
+      if (puntaje > mejorPuntaje) { mejorPuntaje = puntaje; mejor = idx; }
+    });
+    return mejorPuntaje >= 0.75 ? mejor : -1;
+  };
+  const sinTildes = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+  const correosUsados = new Set(resultado.map(i => (i.email || '').toLowerCase()));
+
+  registros.forEach(reg => {
+    const nombre = (reg.instructorNombre || '').trim();
+    if (!nombre || nombre.startsWith('Doc:') || nombre === 'Instructor Asignado') return;
+
+    let idx = buscar(nombre);
+    if (idx < 0) {
+      const nombres = (reg.instructorNombres || nombre.split(' ').slice(0, Math.ceil(nombre.split(' ').length / 2)).join(' ')).trim();
+      const apellidos = (reg.instructorApellidos || nombre.split(' ').slice(Math.ceil(nombre.split(' ').length / 2)).join(' ')).trim();
+      const PARTICULAS = new Set(['de', 'del', 'la', 'las', 'los', 'y']);
+      const primerApellido = apellidos.split(' ').find(w => !PARTICULAS.has(w.toLowerCase())) || 'sena';
+      const base = `${sinTildes(nombres.split(' ')[0] || 'instructor')}.${sinTildes(primerApellido)}`;
+      let email = `${base}@correo.edu.co`;
+      let n = 2;
+      while (correosUsados.has(email)) { email = `${base}${n}@correo.edu.co`; n += 1; }
+      correosUsados.add(email);
+      const { perfilTecnico, especialidad } = inferirEspecialidadPorCompetencia(reg.competenciaDenominacion || '');
+      const inst: Instructor = {
+        id: generarUuid(),
+        documento: '',
+        nombres,
+        apellidos,
+        nombreCompleto: nombre,
+        email,
+        telefono: '',
+        perfilTecnico,
+        especialidad,
+        colorAvatar: COLORES_AVATAR[resultado.length % COLORES_AVATAR.length],
+        horasSemanalesAsignadas: 0,
+        maxHorasSemanales: 40,
+        estado: (reg.instructorEstado || '').toLowerCase().startsWith('inactiv') ? 'INACTIVO' : 'ACTIVO',
+        competenciasExperiencia: []
+      };
+      resultado.push(inst);
+      nuevos.push(inst);
+      idx = resultado.length - 1;
+    }
+
+    const inst = resultado[idx];
+    const prevComp = new Set(inst.competenciasExperiencia || []);
+    if (reg.competenciaCodigo) prevComp.add(reg.competenciaCodigo);
+    if (reg.competenciaDenominacion) prevComp.add(reg.competenciaDenominacion);
+    resultado[idx] = { ...inst, competenciasExperiencia: Array.from(prevComp) };
+  });
+
+  // Los nuevos deben reflejar la experiencia que se les acaba de sumar.
+  const nuevosFinales = nuevos.map(n => resultado.find(r => r.id === n.id) || n);
+  return { instructores: resultado, nuevos: nuevosFinales };
 }

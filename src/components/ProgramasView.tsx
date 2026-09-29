@@ -69,7 +69,7 @@ export const ProgramasView: React.FC<ProgramasViewProps> = ({
           <div className="flex items-center space-x-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
             <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800">Dirección de Formación Profesional</span>
             <span>•</span>
-            <span>Catálogo Curricular SENA</span>
+            <span>Catálogo Curricular</span>
           </div>
           <h1 className="text-2xl font-black text-[#111C2D] tracking-tight mt-1">
             Programas de Formación y Diseño Curricular
@@ -97,7 +97,7 @@ export const ProgramasView: React.FC<ProgramasViewProps> = ({
           <div>
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Programas</span>
             <div className="text-2xl font-black text-[#111C2D] mt-1">{totalProgramas}</div>
-            <div className="text-[11px] text-emerald-700 font-bold mt-0.5">Catálogo Activo CBC</div>
+            <div className="text-[11px] text-emerald-700 font-bold mt-0.5">Catálogo Activo</div>
           </div>
           <div className="w-10 h-10 rounded-xl bg-emerald-50 text-[#0D631B] flex items-center justify-center">
             <GraduationCap className="w-5 h-5" />

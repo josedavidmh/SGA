@@ -160,7 +160,7 @@ export const ModalEditarPrograma: React.FC<ModalEditarProgramaProps> = ({
             <div>
               <div className="flex items-center space-x-2">
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 uppercase tracking-wider">
-                  {isEditing ? 'Gestión Curricular SENA' : 'Nuevo Registro Curricular'}
+                  {isEditing ? 'Gestión Curricular' : 'Nuevo Registro Curricular'}
                 </span>
                 {oldCodigo && (
                   <span className="text-[11px] font-mono text-slate-400">

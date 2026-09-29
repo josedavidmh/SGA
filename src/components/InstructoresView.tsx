@@ -176,9 +176,9 @@ export const InstructoresView: React.FC<InstructoresViewProps> = ({
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            <span className="px-2 py-0.5 rounded bg-[#EDE7F6] text-[#6F43C0]">Talento Humano SENA</span>
+            <span className="px-2 py-0.5 rounded bg-[#EDE7F6] text-[#6F43C0]">Talento Humano</span>
             <span>•</span>
-            <span>Red de Instructores Regional Cesar</span>
+            <span>Red de Instructores</span>
           </div>
           <h1 className="text-2xl font-black text-[#111C2D] tracking-tight mt-1">
             Directorio y Gestión de Instructores
@@ -245,7 +245,7 @@ export const InstructoresView: React.FC<InstructoresViewProps> = ({
         <div className="p-3.5 bg-emerald-50/60 rounded-2xl border border-emerald-200/80 flex items-center text-xs text-emerald-950 gap-2.5">
           <ShieldAlert className="w-4 h-4 text-[#0D631B] shrink-0" />
           <span>
-            <strong>Protección de Datos (No Sensibles):</strong> El directorio captura únicamente identificación institucional (C.C. o Código SENA, nombres, correo corporativo @misena y especialidad) para fines pedagógicos.
+            <strong>Protección de Datos (No Sensibles):</strong> El directorio captura únicamente identificación institucional (C.C. o código, nombres, correo corporativo y especialidad) para fines pedagógicos.
           </span>
         </div>
       </div>
@@ -383,7 +383,7 @@ export const InstructoresView: React.FC<InstructoresViewProps> = ({
                     </div>
                     <div className="flex items-center space-x-2">
                       <Phone className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{inst.telefono || '312 000 0000'} • C.C. {inst.documento}</span>
+                      <span>{inst.telefono || 'Sin teléfono registrado'} • C.C. {inst.documento}</span>
                     </div>
                   </div>
                 </div>

@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import {
   Ficha,
   RegionalCentro,
@@ -29,42 +30,59 @@ function normalizarTexto(s?: string | null): string {
 }
 
 /**
- * El trimestre se guarda internamente como "AAAA-ROMANO" (ej: "2026-III",
- * el mismo formato de `ficha.periodoLectivo` y de `BloqueHorario.trimestre`
- * en Horarios). Los archivos reales de SofiaPlus lo muestran al revés,
- * "ROMANO AAAA" (ej: "III 2026") — esta función solo cambia cómo se ve,
- * nunca la clave interna que se usa para filtrar bloques o para buscar el
- * trimestre en el calendario institucional parametrizado.
+ * El trimestre se guarda internamente como "AAAA-ROMANO" (ej: "2026-III"),
+ * el mismo formato de `ficha.periodoLectivo`, de `BloqueHorario.trimestre`
+ * y del selector de trimestre en la Matriz de Horarios. Este mismo formato
+ * es el que se muestra en la app y en el contenido de los reportes
+ * exportados, para no tener dos formas distintas de ver el mismo dato.
  */
-export function formatoVisualTrimestre(interno: string): string {
-  const m = interno.trim().match(/^(\d{4})-([IVX]+)$/i);
-  if (!m) return interno;
-  return `${m[2].toUpperCase()} ${m[1]}`;
-}
 
 /**
  * FORMATO ASOCIACION DE FICHAS.
- * Un renglón por cada Competencia con instructor asignado en el
- * Seguimiento de esta ficha (RapSeguimiento), deduplicado por
- * competencia — una competencia puede tener varios RAPs pero en este
+ * Un renglón por cada Competencia con instructor asignado, deduplicado
+ * por competencia — una competencia puede tener varios RAPs pero en este
  * formato aparece una sola vez con su instructor.
+ *
+ * Puede descargarse de dos formas:
+ * - TOTAL (sin `filtroTrimestre`): usa el Seguimiento acumulado de toda
+ *   la ficha (RapSeguimiento), sin importar en qué trimestre se asignó
+ *   cada instructor — es la foto histórica completa.
+ * - POR TRIMESTRE (con `filtroTrimestre`): usa únicamente los bloques de
+ *   Horario programados en ese trimestre puntual, para reflejar solo las
+ *   asociaciones competencia-instructor vigentes en ese periodo.
  */
 export function generarFormatoAsociacionFichas(
   ficha: Ficha,
-  rapsSeguimientoFicha: RapSeguimiento[]
+  rapsSeguimientoFicha: RapSeguimiento[],
+  filtroTrimestre?: { trimestre: string; bloquesTrimestre: BloqueHorario[] }
 ) {
   const porCompetencia = new Map<string, { competenciaDenominacion: string; instructorNombre: string }>();
-  rapsSeguimientoFicha
-    .filter(s => s.instructorNombre)
-    .forEach(s => {
-      const key = s.competenciaCodigo;
-      if (!porCompetencia.has(key)) {
-        porCompetencia.set(key, {
-          competenciaDenominacion: s.competenciaDenominacion,
-          instructorNombre: s.instructorNombre!
-        });
-      }
-    });
+
+  if (filtroTrimestre) {
+    filtroTrimestre.bloquesTrimestre
+      .filter(b => !b.vacante && b.instructorNombre)
+      .forEach(b => {
+        const key = b.competenciaCodigo;
+        if (!porCompetencia.has(key)) {
+          porCompetencia.set(key, {
+            competenciaDenominacion: b.competenciaNombre || b.competenciaCodigo,
+            instructorNombre: b.instructorNombre!
+          });
+        }
+      });
+  } else {
+    rapsSeguimientoFicha
+      .filter(s => s.instructorNombre)
+      .forEach(s => {
+        const key = s.competenciaCodigo;
+        if (!porCompetencia.has(key)) {
+          porCompetencia.set(key, {
+            competenciaDenominacion: s.competenciaDenominacion,
+            instructorNombre: s.instructorNombre!
+          });
+        }
+      });
+  }
 
   const filas = Array.from(porCompetencia.values());
 
@@ -75,6 +93,7 @@ export function generarFormatoAsociacionFichas(
     [' ', 'Procedimiento: Desarrollo curricular '],
     [],
     ['Lider:', normalizarTexto(ficha.instructorLiderNombre)],
+    ['Alcance:', filtroTrimestre ? `Trimestre ${filtroTrimestre.trimestre}` : 'Total (todos los trimestres)'],
     [],
     [
       ' CODIGO DEL PROGRAMA DE FORMACIÓN',
@@ -99,7 +118,8 @@ export function generarFormatoAsociacionFichas(
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'FICHA NUEVAS');
-  XLSX.writeFile(wb, `FORMATO_ASOCIACION_FICHAS_${ficha.numero_ficha}.xlsx`);
+  const sufijoArchivo = filtroTrimestre ? `_${filtroTrimestre.trimestre}` : '_Total';
+  XLSX.writeFile(wb, `FORMATO_ASOCIACION_FICHAS_${ficha.numero_ficha}${sufijoArchivo}.xlsx`);
 
   return { totalFilas: filas.length };
 }
@@ -191,14 +211,20 @@ export interface ResultadoReporteEventos {
  *
  * El teléfono del instructor líder se deja siempre en blanco: es un dato
  * sensible que este sistema no maneja.
+ *
+ * Se genera con ExcelJS (no con `xlsx`) porque la edición Community de
+ * `xlsx` no escribe estilos de celda — cualquier borde asignado se
+ * descarta silenciosamente al guardar. ExcelJS sí soporta bordes y
+ * combinación de celdas reales, que es lo que necesita este formato para
+ * verse como el documento oficial de SofiaPlus.
  */
-export function generarFormatoEventos(
+export async function generarFormatoEventos(
   ficha: Ficha,
   centro: RegionalCentro,
   bloquesTrimestre: BloqueHorario[],
   catalogoRaps: ResultadoAprendizaje[],
   trimestre: string
-): ResultadoReporteEventos {
+): Promise<ResultadoReporteEventos> {
   const hoy = new Date();
   const fechaReporte = hoy.toLocaleDateString('es-CO', { year: 'numeric', month: '2-digit', day: '2-digit' });
 
@@ -211,11 +237,12 @@ export function generarFormatoEventos(
   let totalHorasEjecutadas = 0;
   let festivosTotalesExcluidos = 0;
 
-  // Filas de encabezado fijas antes de la tabla de datos (0-indexado):
-  // 0..3 encabezado institucional, 4 en blanco, 5 títulos de columna,
-  // 6 sub-títulos INICIA/FINALIZA. Los datos empiezan en la fila 7.
-  const FILA_INICIO_DATOS = 7;
-  const merges: XLSX.Range[] = [];
+  // Filas de encabezado fijas antes de la tabla de datos (1-indexado, como
+  // usa ExcelJS): 1..4 encabezado institucional, 5 en blanco, 6 títulos de
+  // columna, 7 sub-títulos INICIA/FINALIZA. Los datos empiezan en la fila 8.
+  const FILA_INICIO_DATOS = 8;
+  type Merge = { r1: number; c1: number; r2: number; c2: number };
+  const merges: Merge[] = [];
   let filaCursor = FILA_INICIO_DATOS;
   let esPrimerBloqueGlobal = true;
 
@@ -273,56 +300,114 @@ export function generarFormatoEventos(
 
     // Combinar verticalmente, dentro de este grupo de filas (un RAP por
     // fila), las columnas que pertenecen al bloque completo y no a cada
-    // RAP individual: fecha evento (4-5), horario (6-7), evento (8),
-    // instructor (9), horas (10), día (11) y competencia (14, índice 13).
+    // RAP individual: fecha evento, horario, evento, instructor, horas,
+    // día y competencia (columnas 1-indexadas 4,5,6,7,8,9,10,11,14).
     if (rapsFilas.length > 1) {
       [3, 4, 5, 6, 7, 8, 9, 10, 13].forEach(col => {
-        merges.push({ s: { r: filaInicioGrupo, c: col }, e: { r: filaFinGrupo, c: col } });
+        merges.push({ r1: filaInicioGrupo, c1: col + 1, r2: filaFinGrupo, c2: col + 1 });
       });
-    }
-    if (esPrimerBloqueGlobal && rapsFilas.length > 1) {
-      merges.push({ s: { r: filaInicioGrupo, c: 0 }, e: { r: filaFinGrupo, c: 0 } });
-      merges.push({ s: { r: filaInicioGrupo, c: 1 }, e: { r: filaFinGrupo, c: 1 } });
-      merges.push({ s: { r: filaInicioGrupo, c: 2 }, e: { r: filaFinGrupo, c: 2 } });
     }
 
     filaCursor = filaFinGrupo + 1;
     esPrimerBloqueGlobal = false;
   });
 
-  const wsData: (string | number)[][] = [
-    [
-      ' ', 'REPORTE DE HORAS MENSUALES ', '', 'REGIONAL', centro.regional, '', 'CENTRO DE FORMACION', '',
-      centro.centro, '', '', '   FECHA DEL REPORTE Y TRIMESTRE:', fechaReporte, trimestre
-    ],
-    [' ', 'F001-008-25 / Version 02'],
-    [
-      ' ', 'Proceso: Ejecución de la formación', '', 'INSTRUCTOR LIDER DE LA FICHA:', '', '', '',
-      normalizarTexto(ficha.instructorLiderNombre), '', '', '', 'TELEFONO CELULAR:', '', ''
-    ],
-    [' ', 'Procedimiento: Desarrollo curricular '],
-    [],
-    [
-      'N° FICHA  DE CARACTERIZACION', 'NOMBRE PROGRAMA DE FORMACIÓN', 'CÓDIGO PROGRAMA DE FORMACIÓN Y SU VERSIÓN',
-      'FECHA DE EVENTO', '', 'HORARIO DE FORMACION', '', 'NOMBRE DEL EVENTO DE FORMACIÓN',
-      'INSTRUCTOR A PROGRAMAR', 'HORAS EJECUTADAS ', 'DIAS DE FORMACION',
-      'DESCRIPCION DE LA ACTIVIDAD DE APRENDIZAJE \n(ACTIVIDAD DE LA PPPF)', 'RESULTADO DE APRENDIZAJE',
-      'NOMBRE DE LA COMPETENCIA'
-    ],
-    ['', '', '', 'INICIA', 'FINALIZA', 'INICIA', 'FINALIZA'],
-    ...filas
+  const filaUltimaDatos = filaCursor - 1;
+  const hayDatos = filaUltimaDatos >= FILA_INICIO_DATOS;
+
+  // N° Ficha, Nombre del Programa y Código del Programa son un único dato
+  // para TODO el reporte (una ficha por archivo, nunca cambia entre
+  // bloques), así que se combinan en una sola celda desde la PRIMERA hasta
+  // la ÚLTIMA fila de datos del reporte completo — no solo dentro del
+  // primer bloque, que es lo que dejaba el resto de filas sin bordes
+  // visibles de continuidad.
+  if (hayDatos) {
+    [1, 2, 3].forEach(col => {
+      merges.push({ r1: FILA_INICIO_DATOS, c1: col, r2: filaUltimaDatos, c2: col });
+    });
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet('REPORTE DE EVENTOS');
+
+  ws.columns = [
+    { width: 14 }, { width: 22 }, { width: 18 }, { width: 12 }, { width: 12 }, { width: 10 }, { width: 10 },
+    { width: 35 }, { width: 22 }, { width: 12 }, { width: 12 }, { width: 45 }, { width: 45 }, { width: 45 }
   ];
 
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [
-    { wch: 14 }, { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 },
-    { wch: 35 }, { wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 45 }, { wch: 45 }, { wch: 45 }
-  ];
-  ws['!merges'] = merges;
+  ws.addRow([
+    ' ', 'REPORTE DE HORAS MENSUALES ', '', 'REGIONAL', centro.regional, '', 'CENTRO DE FORMACION', '',
+    centro.centro, '', '', '   FECHA DEL REPORTE Y TRIMESTRE:', fechaReporte, trimestre
+  ]);
+  ws.addRow([' ', 'F001-008-25 / Version 02']);
+  ws.addRow([
+    ' ', 'Proceso: Ejecución de la formación', '', 'INSTRUCTOR LIDER DE LA FICHA:', '', '', '',
+    normalizarTexto(ficha.instructorLiderNombre), '', '', '', 'TELEFONO CELULAR:', '', ''
+  ]);
+  ws.addRow([' ', 'Procedimiento: Desarrollo curricular ']);
+  ws.addRow([]);
+  ws.addRow([
+    'N° FICHA  DE CARACTERIZACION', 'NOMBRE PROGRAMA DE FORMACIÓN', 'CÓDIGO PROGRAMA DE FORMACIÓN Y SU VERSIÓN',
+    'FECHA DE EVENTO', '', 'HORARIO DE FORMACION', '', 'NOMBRE DEL EVENTO DE FORMACIÓN',
+    'INSTRUCTOR A PROGRAMAR', 'HORAS EJECUTADAS ', 'DIAS DE FORMACION',
+    'DESCRIPCION DE LA ACTIVIDAD DE APRENDIZAJE \n(ACTIVIDAD DE LA PPPF)', 'RESULTADO DE APRENDIZAJE',
+    'NOMBRE DE LA COMPETENCIA'
+  ]);
+  ws.addRow(['', '', '', 'INICIA', 'FINALIZA', 'INICIA', 'FINALIZA']);
+  filas.forEach(fila => ws.addRow(fila));
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'REPORTE DE EVENTOS');
-  XLSX.writeFile(wb, `FORMATO_EVENTOS_${ficha.numero_ficha}.xlsx`);
+  // Encabezados de columna en negrita y centrados, con ajuste de texto.
+  [ws.getRow(6), ws.getRow(7)].forEach(fila => {
+    fila.eachCell({ includeEmpty: true }, cell => {
+      cell.font = { bold: true };
+      cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+    });
+  });
+
+  // Combinar celdas: agrupación por bloque + N° Ficha/Programa/Código
+  // abarcando todo el reporte.
+  merges.forEach(m => ws.mergeCells(m.r1, m.c1, m.r2, m.c2));
+
+  // Bordes en toda la grilla del reporte, desde los títulos de columna
+  // (fila 6) hasta la última fila con datos, en las 14 columnas — esto es
+  // lo que la versión gratuita de `xlsx` no podía escribir.
+  const bordeDelgado: Partial<ExcelJS.Borders> = {
+    top: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    left: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    bottom: { style: 'thin', color: { argb: 'FF94A3B8' } },
+    right: { style: 'thin', color: { argb: 'FF94A3B8' } }
+  };
+  const filaFinalGrilla = Math.max(filaUltimaDatos, 7);
+  for (let r = 6; r <= filaFinalGrilla; r++) {
+    for (let c = 1; c <= 14; c++) {
+      ws.getCell(r, c).border = bordeDelgado;
+    }
+  }
+
+  // Alineación superior + ajuste de texto en las columnas de datos con
+  // contenido largo (evento, instructor, RAP, actividad, competencia) y
+  // centrado en las combinadas de ficha/programa/código.
+  if (hayDatos) {
+    for (let r = FILA_INICIO_DATOS; r <= filaUltimaDatos; r++) {
+      [1, 2, 3].forEach(c => {
+        ws.getCell(r, c).alignment = { wrapText: true, vertical: 'top', horizontal: 'center' };
+      });
+      [8, 9, 12, 13, 14].forEach(c => {
+        ws.getCell(r, c).alignment = { wrapText: true, vertical: 'top' };
+      });
+    }
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement('a');
+  enlace.href = url;
+  enlace.download = `FORMATO_EVENTOS_${ficha.numero_ficha}.xlsx`;
+  document.body.appendChild(enlace);
+  enlace.click();
+  document.body.removeChild(enlace);
+  URL.revokeObjectURL(url);
 
   return { totalFilas: filas.length, totalHorasEjecutadas, detalleHoras, festivosTotalesExcluidos };
 }

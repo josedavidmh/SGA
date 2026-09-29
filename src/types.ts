@@ -3,7 +3,8 @@ export type UserRole = 'ADMINISTRADOR' | 'COORDINADOR' | 'INSTRUCTOR_LIDER' | 'A
 export interface User {
   id: string;
   correo: string;
-  clave?: string;
+  clave?: string; // Solo existe en localStorage del navegador donde se creó/usó — nunca se guarda en texto plano en Supabase.
+  claveHash?: string; // Hash (bcrypt) que sí viaja a Supabase, para poder validar la clave desde cualquier navegador/equipo.
   nombre_completo: string;
   rol: UserRole;
   cargo: string;
@@ -144,9 +145,25 @@ export interface RegistroHorasEjecutadas {
   competenciaDenominacion?: string;
   fichaNumero?: string;
   horasEjecutadas: number;
+  /** Nombres / apellidos / estado del instructor tal como vienen en el reporte (para crearlo si no existe). */
+  instructorNombres?: string;
+  instructorApellidos?: string;
+  instructorEstado?: string;
+  /** Horas programadas en SofiaPlus para ese instructor y competencia (Reporte de Instructores por Ficha). */
+  horasProgramadas?: number;
+  /** Rango de la programación en SofiaPlus (dd/mm/aaaa). */
+  fechaInicio?: string;
+  fechaFin?: string;
   periodo?: string;
   fechaRegistro?: string;
   observaciones?: string;
+}
+
+/** Totales que SofiaPlus reporta en el encabezado del Reporte de Instructores por Ficha. */
+export interface TotalesHorasSofia {
+  programadas: number;
+  ejecutadas: number;
+  pendientes: number;
 }
 
 export interface ResultadoAprendizaje {

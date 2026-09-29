@@ -20,12 +20,13 @@ export interface UsoAmbienteFichaTrimestre {
  * Agrupa los bloques de horario por Trimestre + Ficha para el reporte
  * institucional de uso de ambientes.
  *
- * Importante: toma el ambiente TAL COMO QUEDÓ GUARDADO en cada bloque
- * (b.ambiente, fijado al crear el bloque con el ambientePrincipal que
- * tenía la ficha en ese momento), NO el ambientePrincipal actual de la
- * ficha. Así un trimestre pasado sigue mostrando el ambiente que
- * realmente se usó entonces, aunque la ficha se haya mudado de ambiente
- * después — este reporte es histórico por diseño.
+ * Importante: siempre prioriza el ambientePrincipal ACTUAL de la ficha
+ * sobre lo que haya quedado guardado en cada bloque (b.ambiente). Si el
+ * ambiente de la ficha se corrige o se reasigna después de haber creado
+ * los bloques de horario, el reporte debe reflejar ese cambio de
+ * inmediato — no una foto histórica del ambiente que tenía el bloque al
+ * crearse. Solo se usa b.ambiente como respaldo cuando la ficha ya no
+ * existe o no tiene ambiente asignado.
  */
 export function calcularUsoAmbientesPorFichaTrimestre(
   fichas: Ficha[],
@@ -58,7 +59,7 @@ export function calcularUsoAmbientesPorFichaTrimestre(
     }
 
     const item = mapa.get(key)!;
-    const ambiente = (b.ambiente || ficha?.ambientePrincipal || 'Sin ambiente asignado').trim();
+    const ambiente = (ficha?.ambientePrincipal || b.ambiente || 'Sin ambiente asignado').trim();
     item.ambientesSet.add(ambiente);
     item.totalBloques += 1;
     item.totalHoras += b.duracionHoras || 0;
@@ -96,7 +97,7 @@ export function exportarUsoAmbientesExcel(items: UsoAmbienteFichaTrimestre[], tr
   const filtrados = filtrarPorTrimestre(items, trimestreFiltro);
 
   const wsData: (string | number)[][] = [
-    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR SENA - REPORTE DE AMBIENTES POR FICHA'],
+    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR - REPORTE DE AMBIENTES POR FICHA'],
     [trimestreFiltro === 'TODOS' ? 'Todos los trimestres' : `Trimestre: ${trimestreFiltro}`],
     [`FICHAS EN EL REPORTE: ${filtrados.length}`],
     [],
@@ -133,7 +134,7 @@ export function exportarUsoAmbientesPDF(items: UsoAmbienteFichaTrimestre[], trim
 
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR SENA', 40, 36);
+  doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR', 40, 36);
   doc.setFontSize(11);
   doc.text('Reporte de Ambientes por Ficha', 40, 54);
   doc.setFont('helvetica', 'normal');

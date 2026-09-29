@@ -1,15 +1,16 @@
 import * as XLSX from 'xlsx';
-import { 
-  Competencia, 
-  ResultadoAprendizaje, 
-  BloqueHorario, 
-  ActividadSeguimiento, 
-  RegistroHorasEjecutadas, 
-  Ficha, 
-  ValidacionSobrescrituraPlaneacion, 
+import {
+  Competencia,
+  ResultadoAprendizaje,
+  BloqueHorario,
+  ActividadSeguimiento,
+  RegistroHorasEjecutadas,
+  Ficha,
+  ValidacionSobrescrituraPlaneacion,
   ResumenCarguePlaneacion,
   RegistroArchivoSeguimiento
 } from '../types';
+import { generarUuid } from '../lib/id';
 
 /**
  * Colección inicial limpia (0 competencias y 0 RAPs).
@@ -19,7 +20,7 @@ export const COMPETENCIAS_INICIALES: Competencia[] = [];
 export const RESULTADOS_APRENDIZAJE_INICIALES: ResultadoAprendizaje[] = [];
 
 /**
- * Banco referencial demostrativo del SENA CBC (utilizado únicamente si el usuario
+ * Banco referencial demostrativo del SENA (utilizado únicamente si el usuario
  * solicita expresamente la demostración o descarga una plantilla de ejemplo).
  */
 const COMPETENCIAS_DEMO: Competencia[] = [
@@ -545,7 +546,7 @@ export async function parsePlaneacionPedagogicaExcel(
 
               if (!competenciasMap.has(lastCompCodigo)) {
                 competenciasMap.set(lastCompCodigo, {
-                  id: `comp_${programaCodigoTarget}_${lastCompCodigo}`,
+                  id: generarUuid(),
                   programaCodigo: programaCodigoTarget,
                   codigo: lastCompCodigo,
                   denominacion: lastCompDenom,
@@ -601,7 +602,7 @@ export async function parsePlaneacionPedagogicaExcel(
                 // Si la fila actual aportó un código oficial numérico y compExistente no lo tenía, actualizarlo
                 if (compCod && !/^[0-9]+$/.test(compExistente.codigo)) {
                   compExistente.codigo = compCod;
-                  compExistente.id = `comp_${programaCodigoTarget}_${compCod}`;
+                  compExistente.id = generarUuid();
                   lastCompCodigo = compCod;
                 }
               } else {
@@ -618,7 +619,7 @@ export async function parsePlaneacionPedagogicaExcel(
                 lastTipo = (categorizarTipoCompetencia(undefined, lastCompDenom, lastCompCodigo) as any);
 
                 competenciasMap.set(lastCompCodigo, {
-                  id: `comp_${programaCodigoTarget}_${lastCompCodigo}`,
+                  id: generarUuid(),
                   programaCodigo: programaCodigoTarget,
                   codigo: lastCompCodigo,
                   denominacion: lastCompDenom,
@@ -639,7 +640,7 @@ export async function parsePlaneacionPedagogicaExcel(
 
                 if (!competenciasMap.has(lastCompCodigo)) {
                   competenciasMap.set(lastCompCodigo, {
-                    id: `comp_${programaCodigoTarget}_${lastCompCodigo}`,
+                    id: generarUuid(),
                     programaCodigo: programaCodigoTarget,
                     codigo: lastCompCodigo,
                     denominacion: lastCompDenom,
@@ -749,7 +750,7 @@ export async function parsePlaneacionPedagogicaExcel(
                 rapCounter++;
 
                 rapsMap.set(rapKey, {
-                  id: `rap_${programaCodigoTarget}_${lastCompCodigo}_${rapCounter}`,
+                  id: generarUuid(),
                   programaCodigo: programaCodigoTarget,
                   competenciaCodigo: lastCompCodigo,
                   competenciaDenominacion: lastCompDenom,
@@ -811,7 +812,7 @@ export async function parsePlaneacionPedagogicaExcel(
             if (/^[0-9]+$/.test(comp.codigo) && !/^[0-9]+$/.test(compExistente.codigo)) {
               codigoRemap.set(compExistente.codigo, comp.codigo);
               compExistente.codigo = comp.codigo;
-              compExistente.id = `comp_${programaCodigoTarget}_${comp.codigo}`;
+              compExistente.id = generarUuid();
             }
           } else {
             codigosVistos.add(comp.codigo);
@@ -1689,7 +1690,7 @@ export async function procesarPlaneacionPedagogica(
       validacionSobrescritura: validacion,
       detalles: {
         programaCodigo: programaCodigoTarget,
-        programaNombre: 'Programa Curricular SENA',
+        programaNombre: 'Programa Curricular',
         fasesDetectadas: fases,
         totalCompetencias: competenciasFinales.length,
         totalRaps: rapsFinales.length,

@@ -46,35 +46,76 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
   fichaEditar = null
 }) => {
   const modoEdicion = !!fichaEditar;
-  const [numeroFicha, setNumeroFicha] = React.useState(fichaEditar?.numero_ficha || '');
-  const [programaNombre, setProgramaNombre] = React.useState(fichaEditar?.programaNombre || 'ADSO: Análisis y Desarrollo de Software');
-  const [programaCodigo, setProgramaCodigo] = React.useState(fichaEditar?.programaCodigo || '228118');
-  const [version, setVersion] = React.useState(fichaEditar?.version || '1');
-  const [nivelFormacion, setNivelFormacion] = React.useState<'Técnico' | 'Tecnólogo' | 'Auxiliar'>(fichaEditar?.nivelFormacion || 'Tecnólogo');
-  const [modalidad, setModalidad] = React.useState<'Presencial Diurna' | 'Presencial Nocturna' | 'Mixta / Virtual'>(fichaEditar?.modalidad || 'Presencial Diurna');
-  const [ambientePrincipal, setAmbientePrincipal] = React.useState(fichaEditar?.ambientePrincipal || '');
-  const [periodoLectivo, setPeriodoLectivo] = React.useState(fichaEditar?.periodoLectivo || '2026-III');
-  const [fechaInicio, setFechaInicio] = React.useState(fichaEditar?.fechaInicio || '2026-07-01');
-  const [fechaFin, setFechaFin] = React.useState(fichaEditar?.fechaFin || '2027-12-15');
-  const [matriculaInicial, setMatriculaInicial] = React.useState(fichaEditar?.matriculaInicial || 32);
-  
-  // Modo de asignación de Instructor Líder
-  const instExisteEnLista = fichaEditar ? instructores.some(i => i.id === fichaEditar.instructorLiderId) : false;
-  const [modoInstructor, setModoInstructor] = React.useState<'EXISTENTE' | 'NUEVO'>(
-    (modoEdicion && instExisteEnLista) ? 'EXISTENTE' : (instructores.length > 0 ? 'EXISTENTE' : 'NUEVO')
-  );
-  const [instructorLiderId, setInstructorLiderId] = React.useState(
-    fichaEditar?.instructorLiderId || instructores[0]?.id || ''
-  );
-  const [nuevoInstructorNombre, setNuevoInstructorNombre] = React.useState('');
-  const [nuevoInstructorEmail, setNuevoInstructorEmail] = React.useState('');
-  const [nuevoInstructorDocumento, setNuevoInstructorDocumento] = React.useState('');
-  const [nuevoInstructorEspecialidad, setNuevoInstructorEspecialidad] = React.useState('Ingeniería de Software & Arquitectura Cloud');
-  const [crearUsuarioAcceso, setCrearUsuarioAcceso] = React.useState(true);
+  const [numeroFicha, setNumeroFicha] = React.useState('');
+  const [programaNombre, setProgramaNombre] = React.useState('ADSO: Análisis y Desarrollo de Software');
+  const [programaCodigo, setProgramaCodigo] = React.useState('228118');
+  const [version, setVersion] = React.useState('1');
+  const [nivelFormacion, setNivelFormacion] = React.useState<'Técnico' | 'Tecnólogo' | 'Auxiliar'>('Tecnólogo');
+  const [modalidad, setModalidad] = React.useState<'Presencial Diurna' | 'Presencial Nocturna' | 'Mixta / Virtual'>('Presencial Diurna');
+  const [ambientePrincipal, setAmbientePrincipal] = React.useState('');
+  const [periodoLectivo, setPeriodoLectivo] = React.useState('2026-III');
+  const [fechaInicio, setFechaInicio] = React.useState('2026-07-01');
+  const [fechaFin, setFechaFin] = React.useState('2027-12-15');
+  const [matriculaInicial, setMatriculaInicial] = React.useState(32);
+
+  // El Instructor Líder SIEMPRE se selecciona de la lista de instructores ya
+  // registrados (nunca se captura manualmente desde este formulario) — el
+  // alta de instructores nuevos vive únicamente en el módulo Instructores.
+  const [instructorLiderId, setInstructorLiderId] = React.useState(instructores[0]?.id || '');
 
   // Horas Lectivas (incluye trabajo autónomo) y Etapa Productiva
-  const [horasDirectas, setHorasDirectas] = React.useState(fichaEditar?.horasDirectasTotales || 3120);
-  const [horasIndependientes, setHorasIndependientes] = React.useState(fichaEditar?.horasIndependientesTotales || 864);
+  const [horasDirectas, setHorasDirectas] = React.useState(3120);
+  const [horasIndependientes, setHorasIndependientes] = React.useState(864);
+
+  // Sincroniza TODOS los campos del formulario con la ficha real cada vez que el modal
+  // se abre (crear o editar). Antes, al estar este componente montado una sola vez para
+  // toda la sesión de la app, los useState de arriba solo se inicializaban con la PRIMERA
+  // ficha que se editara (o en blanco si aún no se había editado ninguna) — reabrir el
+  // modal para editar cualquier OTRA ficha dejaba todos los campos desactualizados o en
+  // blanco, incluidos el Número de Ficha y el Ambiente de Formación reportados por el
+  // usuario como "se borran" — con el riesgo real de sobrescribir la ficha real con esos
+  // valores obsoletos/vacíos al guardar (por ejemplo, vaciando ambientePrincipal, lo que a
+  // su vez hacía que los reportes de ambientes cayeran a datos históricos del bloque en
+  // lugar del ambiente real vigente de la ficha).
+  React.useEffect(() => {
+    if (!isOpen) return;
+    if (fichaEditar) {
+      setNumeroFicha(fichaEditar.numero_ficha || '');
+      setProgramaNombre(fichaEditar.programaNombre || 'ADSO: Análisis y Desarrollo de Software');
+      setProgramaCodigo(fichaEditar.programaCodigo || '228118');
+      setVersion(fichaEditar.version || '1');
+      setNivelFormacion(fichaEditar.nivelFormacion || 'Tecnólogo');
+      setModalidad(fichaEditar.modalidad || 'Presencial Diurna');
+      setAmbientePrincipal(fichaEditar.ambientePrincipal || '');
+      setPeriodoLectivo(fichaEditar.periodoLectivo || '2026-III');
+      setFechaInicio(fichaEditar.fechaInicio || '2026-07-01');
+      setFechaFin(fichaEditar.fechaFin || '2027-12-15');
+      setMatriculaInicial(fichaEditar.matriculaInicial || 32);
+      const instExiste = instructores.some(i => i.id === fichaEditar.instructorLiderId);
+      setInstructorLiderId(instExiste ? fichaEditar.instructorLiderId : (instructores[0]?.id || ''));
+      setHorasDirectas(fichaEditar.horasDirectasTotales || 3120);
+      setHorasIndependientes(fichaEditar.horasIndependientesTotales || 864);
+    } else {
+      setNumeroFicha('');
+      setProgramaNombre('ADSO: Análisis y Desarrollo de Software');
+      setProgramaCodigo('228118');
+      setVersion('1');
+      setNivelFormacion('Tecnólogo');
+      setModalidad('Presencial Diurna');
+      setAmbientePrincipal('');
+      setPeriodoLectivo('2026-III');
+      setFechaInicio('2026-07-01');
+      setFechaFin('2027-12-15');
+      setMatriculaInicial(32);
+      setInstructorLiderId(instructores[0]?.id || '');
+      setHorasDirectas(3120);
+      setHorasIndependientes(864);
+    }
+    // Se sincroniza deliberadamente solo con isOpen/fichaEditar: `instructores` se lee
+    // dentro para resolver el instructor líder por defecto, pero no debe disparar una
+    // resincronización mientras el modal ya está abierto y el usuario está escribiendo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, fichaEditar]);
 
   // Estados de Sincronización Supabase
   const [saving, setSaving] = React.useState<boolean>(false);
@@ -90,7 +131,7 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!numeroFicha.trim()) {
-      alert('Por favor ingrese el número de ficha oficial SENA.');
+      alert('Por favor ingrese el número de ficha oficial.');
       return;
     }
     if (fechaInicio && fechaFin && fechaFin < fechaInicio) {
@@ -100,37 +141,9 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
 
     let finalInstId = 'inst_por_asignar';
     let finalInstNombre = 'Instructor Por Asignar';
-    let finalInstEmail = 'instructor@misena.edu.co';
+    let finalInstEmail = 'instructor@correo.edu.co';
 
-    if (modoInstructor === 'NUEVO' && nuevoInstructorNombre.trim()) {
-      const docClean = nuevoInstructorDocumento.trim() || `cc_${Date.now()}`;
-      const emailClean = nuevoInstructorEmail.trim().toLowerCase() || `inst.${nuevoInstructorNombre.toLowerCase().replace(/\s+/g, '.')}@misena.edu.co`;
-      const idInst = `inst_${docClean}`;
-
-      const nuevoInst: Instructor = {
-        id: idInst,
-        documento: nuevoInstructorDocumento.trim() || '100000000',
-        nombres: nuevoInstructorNombre.split(' ')[0] || nuevoInstructorNombre,
-        apellidos: nuevoInstructorNombre.split(' ').slice(1).join(' ') || '',
-        nombreCompleto: nuevoInstructorNombre.trim(),
-        email: emailClean,
-        telefono: '3100000000',
-        perfilTecnico: nuevoInstructorEspecialidad,
-        especialidad: nuevoInstructorEspecialidad,
-        colorAvatar: 'bg-emerald-600',
-        horasSemanalesAsignadas: 0,
-        maxHorasSemanales: 32,
-        estado: 'ACTIVO'
-      };
-
-      if (onRegistrarInstructor) {
-        onRegistrarInstructor(nuevoInst, crearUsuarioAcceso);
-      }
-
-      finalInstId = nuevoInst.id;
-      finalInstNombre = nuevoInst.nombreCompleto;
-      finalInstEmail = nuevoInst.email;
-    } else if (modoInstructor === 'EXISTENTE' && instructorLiderId) {
+    if (instructorLiderId) {
       const instLider = instructores.find(i => i.id === instructorLiderId);
       if (instLider) {
         finalInstId = instLider.id;
@@ -268,7 +281,7 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
                 {modoEdicion ? `Editar Ficha ${fichaEditar?.numero_ficha}` : 'Registrar Nueva Ficha de Formación'}
               </h2>
               <p className="text-xs text-slate-500">
-                {modoEdicion ? 'Modificar los datos de la ficha existente' : 'Creación manual de cohorte en el Centro Biotecnológico del Caribe'}
+                {modoEdicion ? 'Modificar los datos de la ficha existente' : 'Creación manual de cohorte'}
               </p>
             </div>
           </div>
@@ -424,6 +437,14 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
               className="w-full bg-[#F8F9FA] border border-slate-200 rounded-xl px-3 py-2 font-medium text-[#111C2D] outline-none"
             >
               <option value="">-- Seleccionar ambiente --</option>
+              {/* Si la ficha tiene guardado un ambiente que ya no está en la
+                  lista (p.ej. el valor de demostración "Ambiente 204 - TIC /
+                  Software"), se muestra tal cual para que se vea qué tiene y
+                  se pueda cambiar. Antes el selector aparecía en blanco y el
+                  valor viejo se volvía a guardar sin que se notara. */}
+              {ambientePrincipal && !ambientes.some(a => a.nombre === ambientePrincipal) && (
+                <option value={ambientePrincipal}>⚠ {ambientePrincipal} (no registrado — elige otro)</option>
+              )}
               {ambientes.length > 0 ? (
                 ambientes.map(amb => (
                   <option key={amb.id} value={amb.nombre}>
@@ -449,35 +470,9 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
                 <span>Instructor Líder Asignado a la Ficha</span>
               </label>
 
-              <div className="flex items-center space-x-1 bg-white p-1 rounded-xl border border-slate-200 text-[11px] font-bold">
-                {instructores.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setModoInstructor('EXISTENTE')}
-                    className={`px-2.5 py-1 rounded-lg transition-all ${
-                      modoInstructor === 'EXISTENTE'
-                        ? 'bg-[#0D631B] text-white shadow-2xs'
-                        : 'text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    Instructor Existente
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setModoInstructor('NUEVO')}
-                  className={`px-2.5 py-1 rounded-lg transition-all ${
-                    modoInstructor === 'NUEVO'
-                      ? 'bg-[#0D631B] text-white shadow-2xs'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  + Asignar Nuevo Líder
-                </button>
-              </div>
             </div>
 
-            {modoInstructor === 'EXISTENTE' && instructores.length > 0 ? (
+            {instructores.length > 0 ? (
               <div>
                 <select
                   value={instructorLiderId}
@@ -495,80 +490,15 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
                 </p>
               </div>
             ) : (
-              <div className="space-y-3 pt-1">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                      Nombre Completo del Instructor Líder *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Ej: Ing. Mario Gómez Restrepo"
-                      value={nuevoInstructorNombre}
-                      onChange={(e) => setNuevoInstructorNombre(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-[#111C2D] outline-none focus:border-[#0D631B]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                      Correo Electrónico Institucional *
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      placeholder="Ej: mgomez@misena.edu.co"
-                      value={nuevoInstructorEmail}
-                      onChange={(e) => setNuevoInstructorEmail(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-[#111C2D] outline-none focus:border-[#0D631B]"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                      Documento de Identidad (CC)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ej: 77189204"
-                      value={nuevoInstructorDocumento}
-                      onChange={(e) => setNuevoInstructorDocumento(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-[#111C2D] outline-none focus:border-[#0D631B]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                      Especialidad / Perfil Profesional
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ej: Análisis y Desarrollo de Software"
-                      value={nuevoInstructorEspecialidad}
-                      onChange={(e) => setNuevoInstructorEspecialidad(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-[#111C2D] outline-none focus:border-[#0D631B]"
-                    />
-                  </div>
-                </div>
-
-                <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="crear-user-lider"
-                      checked={crearUsuarioAcceso}
-                      onChange={(e) => setCrearUsuarioAcceso(e.target.checked)}
-                      className="w-4 h-4 text-[#0D631B] accent-[#0D631B] rounded"
-                    />
-                    <label htmlFor="crear-user-lider" className="font-bold text-[#0D631B] cursor-pointer text-[11px]">
-                      Crear usuario de acceso para este Instructor Líder (Acceso exclusivo a sus fichas)
-                    </label>
-                  </div>
-                  <span className="text-[10px] text-slate-500 font-mono">Clave: Sena2026*</span>
-                </div>
+              // El registro de instructores nuevos NO se hace desde aquí — solo se
+              // selecciona entre los ya existentes. Si aún no hay ninguno, se dirige
+              // al usuario al módulo Instructores en vez de ofrecer captura manual.
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 font-medium flex items-start space-x-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Aún no hay instructores registrados. Ve al módulo <strong>Instructores</strong> para
+                  registrar uno antes de asignarlo como líder de esta ficha.
+                </span>
               </div>
             )}
           </div>

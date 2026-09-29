@@ -36,16 +36,81 @@ export const CierresView: React.FC<CierresProps> = ({
   centro,
   onActualizarBalance
 }) => {
-  // Formulario de balance
+  // Formulario de balance (editable manualmente en todo momento, ver más abajo)
   const [culminados, setCulminados] = React.useState<number>(ficha?.aprendicesCulminados || 0);
   const [cancelados, setCancelados] = React.useState<number>(ficha?.aprendicesCancelados || 0);
   const [aplazados, setAplazados] = React.useState<number>(ficha?.aprendicesAplazados || 0);
   const [retiros, setRetiros] = React.useState<number>(ficha?.aprendicesRetiroVoluntario || 0);
 
+  // Re-sincroniza el formulario cada vez que cambia la ficha seleccionada (o sus datos
+  // se actualizan, p. ej. tras un nuevo cargue de Juicios Evaluativos) — de lo contrario
+  // los useState de arriba solo reflejan la ficha que estaba seleccionada quando este
+  // componente se montó, y cambiar de ficha sin salir de la pestaña de Cierres dejaba
+  // estos campos en 0 o con datos de la ficha anterior en vez de los reales.
+  const fichaIdRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (fichaIdRef.current === (ficha?.id || null)) return;
+    fichaIdRef.current = ficha?.id || null;
+    setCulminados(ficha?.aprendicesCulminados || 0);
+    setCancelados(ficha?.aprendicesCancelados || 0);
+    setAplazados(ficha?.aprendicesAplazados || 0);
+    setRetiros(ficha?.aprendicesRetiroVoluntario || 0);
+  }, [ficha]);
+
+  // El coordinador puede refrescar en cualquier momento estos campos con los valores
+  // que ya calculó el sistema a partir del último Reporte de Juicios Evaluativos cargado
+  // para esta ficha (Cancelados, Aplazados y Retiros Voluntarios se derivan del estado de
+  // matrícula real de cada aprendiz en ese cargue). "Culminados" no tiene una fuente
+  // automática en Juicios — SofiaPlus no reporta ese estado por aprendiz — así que se
+  // deja siempre de carga manual.
+  const handleActualizarDesdeJuicios = () => {
+    if (!ficha) return;
+    setCancelados(ficha.aprendicesCancelados || 0);
+    setAplazados(ficha.aprendicesAplazados || 0);
+    setRetiros(ficha.aprendicesRetiroVoluntario || 0);
+  };
+
   // Cálculo desasistido de fórmulas institucionales (PRD 3.4)
   const matricula = ficha?.matriculaInicial || 35;
   const tasaRetencion = Number(((culminados / matricula) * 100).toFixed(1));
   const tasaDesercion = Number((((cancelados + retiros) / matricula) * 100).toFixed(1));
+
+  // Totales del Programa: suma la matrícula y los cierres de TODAS las fichas
+  // del mismo programa (no solo esta), usando los valores del formulario para
+  // la ficha que se está editando en este momento — así el índice de
+  // deserción/retención del programa reacciona al instante mientras se ajusta
+  // el cierre de una cohorte, en vez de esperar a que se guarde.
+  const totalesPrograma = React.useMemo(() => {
+    if (!ficha) return null;
+    const fichasPrograma = allFichas.filter(f => f.programaCodigo === ficha.programaCodigo);
+    let totalMatricula = 0, totalCulminados = 0, totalCancelados = 0, totalAplazados = 0, totalRetiros = 0;
+    fichasPrograma.forEach(f => {
+      totalMatricula += f.matriculaInicial || 0;
+      if (f.id === ficha.id) {
+        totalCulminados += culminados;
+        totalCancelados += cancelados;
+        totalAplazados += aplazados;
+        totalRetiros += retiros;
+      } else {
+        totalCulminados += f.aprendicesCulminados || 0;
+        totalCancelados += f.aprendicesCancelados || 0;
+        totalAplazados += f.aprendicesAplazados || 0;
+        totalRetiros += f.aprendicesRetiroVoluntario || 0;
+      }
+    });
+    const totalDeserciones = totalCancelados + totalRetiros;
+    return {
+      totalFichas: fichasPrograma.length,
+      totalMatricula,
+      totalCulminados,
+      totalCancelados,
+      totalAplazados,
+      totalRetiros,
+      totalDeserciones,
+      tasaRetencionPrograma: totalMatricula > 0 ? Number(((totalCulminados / totalMatricula) * 100).toFixed(1)) : 0,
+      tasaDesercionPrograma: totalMatricula > 0 ? Number((((totalCancelados + totalRetiros) / totalMatricula) * 100).toFixed(1)) : 0
+    };
+  }, [ficha, allFichas, culminados, cancelados, aplazados, retiros]);
 
   const handleGuardarCierre = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,7 +144,7 @@ export const CierresView: React.FC<CierresProps> = ({
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            <span className="px-2 py-0.5 rounded bg-[#EDE7F6] text-[#6F43C0]">Fórmulas Institucionales SENA</span>
+            <span className="px-2 py-0.5 rounded bg-[#EDE7F6] text-[#6F43C0]">Fórmulas Institucionales</span>
             <span>•</span>
             <span>Comité de Evaluación y Cierre</span>
           </div>
@@ -161,6 +226,55 @@ export const CierresView: React.FC<CierresProps> = ({
         </div>
       </div>
 
+      {/* Totales del Programa: la misma ficha pero sumada con todas las demás
+          cohortes del mismo programa — el índice progresivo del programa completo. */}
+      {totalesPrograma && (
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div className="flex items-center space-x-2">
+              <div className="w-9 h-9 rounded-xl bg-[#EDE7F6] text-[#6F43C0] flex items-center justify-center shrink-0">
+                <GraduationCap className="w-4.5 h-4.5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-[#111C2D]">
+                  Total del Programa — {ficha.programaNombre}
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Suma progresiva de las {totalesPrograma.totalFichas} ficha{totalesPrograma.totalFichas !== 1 ? 's' : ''} de este programa (incluye los valores que estás editando aquí).
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="p-3 rounded-xl bg-[#F8F9FA] border border-slate-200">
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Matrícula</div>
+              <div className="text-lg font-black text-[#111C2D]">{totalesPrograma.totalMatricula}</div>
+            </div>
+            <div className="p-3 rounded-xl bg-[#F8F9FA] border border-slate-200">
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Culminados</div>
+              <div className="text-lg font-black text-[#2E7D32]">{totalesPrograma.totalCulminados}</div>
+            </div>
+            <div className="p-3 rounded-xl bg-[#F8F9FA] border border-slate-200">
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Deserciones</div>
+              <div className="text-lg font-black text-[#BA1A1A]">{totalesPrograma.totalDeserciones}</div>
+            </div>
+            <div className="p-3 rounded-xl bg-[#F8F9FA] border border-slate-200">
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Aplazados</div>
+              <div className="text-lg font-black text-amber-600">{totalesPrograma.totalAplazados}</div>
+            </div>
+            <div className="p-3 rounded-xl bg-[#E8F5E9] border border-[#C8E6C9]">
+              <div className="text-[10px] font-bold text-[#2E7D32] uppercase tracking-wider">Retención Prog.</div>
+              <div className="text-lg font-black text-[#2E7D32]">{totalesPrograma.tasaRetencionPrograma}%</div>
+            </div>
+            <div className="p-3 rounded-xl bg-[#FFDAD6] border border-[#FFDAD6]">
+              <div className="text-[10px] font-bold text-[#BA1A1A] uppercase tracking-wider">Deserción Prog.</div>
+              <div className="text-lg font-black text-[#BA1A1A]">{totalesPrograma.tasaDesercionPrograma}%</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Formulario de Cierre de Ficha y Balance */}
       <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-5">
         <div className="border-b border-slate-100 pb-4 flex items-center justify-between">
@@ -169,12 +283,23 @@ export const CierresView: React.FC<CierresProps> = ({
               Formulario de Balance de Cierre — Ficha {ficha.numero_ficha}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Ingrese los valores validados en el comité de evaluación al culminar la etapa lectiva.
+              Ingrese los valores validados en el comité de evaluación al culminar la etapa lectiva. Todos los campos quedan editables manualmente.
             </p>
           </div>
-          <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-50 text-blue-700">
-            Matrícula Inicial: {matricula} Aprendices
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleActualizarDesdeJuicios}
+              className="flex items-center space-x-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-emerald-50 text-[#0D631B] border border-emerald-200 hover:bg-emerald-100 transition-colors"
+              title="Reemplaza Cancelados, Aplazados y Retiros Voluntarios con los valores calculados a partir del último Reporte de Juicios Evaluativos cargado para esta ficha"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Actualizar desde Juicios</span>
+            </button>
+            <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-50 text-blue-700">
+              Matrícula Inicial: {matricula} Aprendices
+            </span>
+          </div>
         </div>
 
         <form onSubmit={handleGuardarCierre} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

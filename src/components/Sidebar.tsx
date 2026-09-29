@@ -103,14 +103,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div 
             onClick={collapsed && onToggleCollapse ? onToggleCollapse : undefined}
             className="w-10 h-10 rounded-xl bg-[#0D631B] flex items-center justify-center text-white font-black text-xl shadow-md shadow-[#0D631B]/20 shrink-0 cursor-pointer select-none"
-            title={collapsed ? "Expandir menú lateral" : "SENA CBC"}
+            title={collapsed ? "Expandir menú lateral" : "Sistema"}
           >
             S
           </div>
           {!collapsed && (
             <div className="min-w-0">
               <div className="text-xs font-black tracking-wider text-[#0D631B] uppercase flex items-center gap-1.5">
-                <span>SENA</span>
+                <span>Sistema</span>
                 <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-[#E8F5E9] text-[#2E7D32] border border-[#C8E6C9]">
                   v2.4
                 </span>
@@ -550,7 +550,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {collapsed ? (
           <div 
             className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 border border-blue-200/60 flex items-center justify-center cursor-pointer"
-            title="Mesa de Soporte: Extensión 2415 • SENA"
+            title="Mesa de Soporte: Extensión 2415"
           >
             <Headphones className="w-4 h-4" />
           </div>
@@ -561,7 +561,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-xs font-bold text-[#111C2D]">Mesa de Soporte</div>
-              <div className="text-[11px] text-slate-500 truncate">Extensión 2415 • SENA</div>
+              <div className="text-[11px] text-slate-500 truncate">Extensión 2415</div>
             </div>
           </>
         )}

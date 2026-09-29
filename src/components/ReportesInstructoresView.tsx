@@ -170,7 +170,7 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold text-slate-700 truncate">{b.competenciaNombre || b.rapTitulo}</div>
                     <div className="text-[10px] text-slate-400 truncate">
-                      {f ? `Ficha ${f.numero_ficha} — ${f.programaNombre}` : 'Ficha no identificada'} • {b.ambiente}
+                      {f ? `Ficha ${f.numero_ficha} — ${f.programaNombre}` : 'Ficha no identificada'} • {f?.ambientePrincipal || b.ambiente}
                     </div>
                   </div>
                   <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
@@ -274,7 +274,7 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
                           <div className="min-w-0 flex-1">
                             <div className="font-semibold text-slate-700 truncate">{b.competenciaNombre || b.rapTitulo}</div>
                             <div className="text-[10px] text-slate-400 truncate">
-                              {f ? `Ficha ${f.numero_ficha} — ${f.programaNombre}` : 'Ficha no identificada'} • {b.ambiente}
+                              {f ? `Ficha ${f.numero_ficha} — ${f.programaNombre}` : 'Ficha no identificada'} • {f?.ambientePrincipal || b.ambiente}
                             </div>
                           </div>
                           <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-50 text-[#0D631B] shrink-0">

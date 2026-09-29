@@ -68,11 +68,11 @@ export const DescargarStandaloneModal: React.FC<DescargarStandaloneModalProps> =
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>SENA CBC - Gestión Académica</title>
+  <title>Gestión Académica</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div id="view-container">Cargando SENA Standalone...</div>
+  <div id="view-container">Cargando Sistema Standalone...</div>
   <script src="app.js"></script>
 </body>
 </html>`;
@@ -81,13 +81,13 @@ export const DescargarStandaloneModal: React.FC<DescargarStandaloneModalProps> =
       zip.file('index.html', indexHtml);
       zip.file('style.css', styleCss);
       zip.file('app.js', appJs);
-      zip.file('README.md', readmeMd || `# SENA CBC - Versión Standalone\nConsulte las instrucciones en index.html`);
+      zip.file('README.md', readmeMd || `# Sistema de Gestión Académica - Versión Standalone\nConsulte las instrucciones en index.html`);
 
       const content = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'sena-cbc-gestion-academica-standalone-github.zip';
+      link.download = 'sena-gestion-academica-standalone-github.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -156,8 +156,8 @@ export const DescargarStandaloneModal: React.FC<DescargarStandaloneModalProps> =
               </a>
 
               <a
-                href="/sena-cbc-standalone.zip"
-                download="sena-cbc-gestion-academica-standalone.zip"
+                href="/sena-standalone.zip"
+                download="sena-gestion-academica-standalone.zip"
                 className="flex-1 sm:flex-initial py-2.5 px-4 rounded-xl bg-[#0D631B] hover:bg-[#0a4d15] text-white text-xs font-bold flex items-center justify-center space-x-2 shadow-xs transition-all hover:scale-105"
                 title="Descargar paquete comprimido ZIP"
               >
@@ -253,7 +253,7 @@ export const DescargarStandaloneModal: React.FC<DescargarStandaloneModalProps> =
         {/* Pie */}
         <div className="pt-3 border-t border-slate-100 flex items-center justify-between shrink-0">
           <span className="text-[11px] text-slate-400">
-            SENA CBC Regional Cesar • 2026
+            2026
           </span>
           <button
             onClick={onClose}

@@ -1,6 +1,7 @@
 import React from 'react';
-import { 
-  Sliders, 
+import { generarUuid } from '../lib/id';
+import {
+  Sliders,
   Sparkles, 
   Plus, 
   Search, 
@@ -99,7 +100,7 @@ export const ParametrizacionesView: React.FC<ParametrizacionesViewProps> = ({
     nombre: '',
     codigo: '',
     tipo: 'Ambiente TIC' as 'Ambiente TIC' | 'Laboratorio' | 'Taller' | 'Auditorio' | 'Virtual',
-    sede: centro.sede || 'Sede Principal - Valledupar',
+    sede: centro.sede || 'Sede Principal',
     capacidadAprendices: 30,
     equipamiento: '',
     estado: 'DISPONIBLE' as 'DISPONIBLE' | 'EN_MANTENIMIENTO' | 'OCUPADO'
@@ -199,7 +200,7 @@ export const ParametrizacionesView: React.FC<ParametrizacionesViewProps> = ({
       nombre: '',
       codigo: `AMB-${Math.floor(100 + Math.random() * 900)}`,
       tipo: 'Ambiente TIC',
-      sede: centro.sede || 'Sede Principal - Valledupar',
+      sede: centro.sede || 'Sede Principal',
       capacidadAprendices: 30,
       equipamiento: '30 Equipos Core i7, Pantalla interactiva, Conexión LAN',
       estado: 'DISPONIBLE'
@@ -213,7 +214,7 @@ export const ParametrizacionesView: React.FC<ParametrizacionesViewProps> = ({
       nombre: amb.nombre,
       codigo: amb.codigo,
       tipo: amb.tipo,
-      sede: amb.sede || centro.sede || 'Sede Principal - Valledupar',
+      sede: amb.sede || centro.sede || 'Sede Principal',
       capacidadAprendices: amb.capacidadAprendices || 30,
       equipamiento: amb.equipamiento || '',
       estado: (amb.estado as any) || 'DISPONIBLE'
@@ -229,7 +230,11 @@ export const ParametrizacionesView: React.FC<ParametrizacionesViewProps> = ({
     }
 
     const nuevo: AmbienteAprendizaje = {
-      id: ambienteEditando ? ambienteEditando.id : `amb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      // UUID real: ambientes.id es UUID en Supabase — un id con prefijo de
+      // texto (como el `amb_...` que se usaba antes) hacía que el insert lo
+      // rechazara por completo, en silencio (esto es, muy probablemente, la
+      // causa real del ambiente que "desapareció" reportado antes).
+      id: ambienteEditando ? ambienteEditando.id : generarUuid(),
       nombre: formAmbiente.nombre.trim(),
       codigo: formAmbiente.codigo.trim(),
       tipo: formAmbiente.tipo,
@@ -265,7 +270,7 @@ export const ParametrizacionesView: React.FC<ParametrizacionesViewProps> = ({
           <div className="flex items-center space-x-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
             <span className="px-2 py-0.5 rounded bg-[#EDE7F6] text-[#6F43C0]">Configuración y Estructura</span>
             <span>•</span>
-            <span className="text-[#0D631B] font-semibold">Tablas Maestras SENA CBC</span>
+            <span className="text-[#0D631B] font-semibold">Tablas Maestras</span>
           </div>
           <h1 className="text-2xl font-black text-[#111C2D] tracking-tight mt-1 flex items-center space-x-2.5">
             <Sliders className="w-6 h-6 text-[#0D631B]" />

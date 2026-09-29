@@ -9,7 +9,6 @@ export function generarReporteEventosF001(
 ) {
   // Generar estructura oficial F001-008-25 / Versión 02
   const wsData = [
-    ['SERVICIO NACIONAL DE APRENDIZAJE - SENA'],
     ['FORMATO OFICIAL DE REPORTE DE EVENTOS Y HORAS FORMATIVAS'],
     ['CÓDIGO: F001-008-25', '', '', 'VERSIÓN: 02', '', '', 'FECHA DE EMISIÓN: 2026-09-17'],
     [],
@@ -55,7 +54,7 @@ export function generarReporteEventosF001(
     ]),
     [],
     ['CERTIFICACIÓN:'],
-    ['El presente reporte ha sido consolidado de manera desasistida y validado conforme al estándar institucional SENA.'],
+    ['El presente reporte ha sido consolidado de manera desasistida y validado conforme al estándar institucional.'],
     ['Firma Instructor Líder: ___________________________', '', '', 'Firma Coordinación Académica: ___________________________']
   ];
 
@@ -81,7 +80,7 @@ export function generarReporteEventosF001(
 
 export function exportarSeguimientoExcel(ficha: Ficha, actividades: ActividadSeguimiento[]) {
   const wsData = [
-    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR SENA - REPORTE DE SEGUIMIENTO (GPFI-F-134)'],
+    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR - REPORTE DE SEGUIMIENTO (GPFI-F-134)'],
     [`FICHA: ${ficha.numero_ficha} - ${ficha.programaNombre}`],
     [`INSTRUCTOR LÍDER: ${ficha.instructorLiderNombre} | CORTE: ${new Date().toLocaleDateString()}`],
     [],
@@ -121,7 +120,7 @@ export function exportarSeguimientoExcel(ficha: Ficha, actividades: ActividadSeg
 
 export function exportarHorariosExcel(ficha: Ficha, horarios: BloqueHorario[]) {
   const wsData = [
-    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR SENA - PROGRAMACIÓN DE HORARIOS'],
+    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR - PROGRAMACIÓN DE HORARIOS'],
     [`FICHA: ${ficha.numero_ficha} - ${ficha.programaNombre}`],
     [`AMBIENTE: ${ficha.ambientePrincipal} | PERIODO: ${ficha.periodoLectivo}`],
     [],

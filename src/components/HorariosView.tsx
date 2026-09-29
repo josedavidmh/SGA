@@ -45,8 +45,11 @@ import {
   User,
   Competencia,
   ResultadoAprendizaje,
-  RapSeguimiento
+  RapSeguimiento,
+  RegistroHorasEjecutadas,
+  ActividadSeguimiento
 } from '../types';
+import { calcularComparativoCompetencias } from '../services/horasEjecutadasService';
 import {
   exportarHorarioFichaExcel,
   exportarHorarioFichaPDF
@@ -66,6 +69,9 @@ interface HorariosProps {
   onEliminarBloque: (bloqueId: string) => void;
   onQuitarInstructorDeBloque?: (bloqueId: string) => void;
   onAsignarInstructorABloque?: (bloqueId: string, instructor: Instructor) => void;
+  /** Horas por competencia cargadas desde SofiaPlus (para avisar si una competencia ya pasó del 100%). */
+  registrosHorasEjecutadas?: RegistroHorasEjecutadas[];
+  actividades?: ActividadSeguimiento[];
   onNavigateToCompetencias?: (programaCodigo?: string) => void;
   onSelectFicha?: (ficha: Ficha) => void;
   onNavigateToReportesInstructores?: () => void;
@@ -128,7 +134,17 @@ export const FRANJAS: { franja: FranjaHorario; label: string; sub: string }[] = 
   { franja: '16:00 - 19:00', label: '16:00 - 19:00', sub: 'Tarde B2' },
 ];
 
-export const HorariosView: React.FC<HorariosProps> = ({
+// La vista tiene un retorno temprano ("No hay ficha seleccionada") ANTES de
+// varios hooks (useMemo). Al pasar de "sin ficha" a "con ficha", React veía
+// más hooks que en el render anterior y lanzaba "Rendered more hooks than
+// during the previous render": por eso elegir una ficha desde esa pantalla
+// no llevaba al horario. Con una key distinta para cada caso, React monta
+// una instancia nueva y el número de hooks siempre es consistente.
+export const HorariosView: React.FC<HorariosProps> = (props) => (
+  <HorariosViewInterno key={props.ficha ? 'con-ficha' : 'sin-ficha'} {...props} />
+);
+
+const HorariosViewInterno: React.FC<HorariosProps> = ({
   currentUser,
   ficha,
   instructores,
@@ -141,6 +157,8 @@ export const HorariosView: React.FC<HorariosProps> = ({
   onEliminarBloque,
   onQuitarInstructorDeBloque,
   onAsignarInstructorABloque,
+  registrosHorasEjecutadas = [],
+  actividades = [],
   onNavigateToCompetencias,
   onSelectFicha,
   onNavigateToReportesInstructores
@@ -493,7 +511,9 @@ export const HorariosView: React.FC<HorariosProps> = ({
       return {
         hasConflicto: true,
         fichaNumero: fichaConflicto ? fichaConflicto.numero_ficha : 'Otra ficha',
-        ambiente: asignacionExterna.ambiente
+        // Siempre el ambiente ACTUAL de esa otra ficha — nunca el que quedó
+        // guardado en su bloque al crearlo, que puede estar desactualizado.
+        ambiente: fichaConflicto?.ambientePrincipal || asignacionExterna.ambiente
       };
     }
     return { hasConflicto: false, fichaNumero: '', ambiente: '' };
@@ -571,6 +591,9 @@ export const HorariosView: React.FC<HorariosProps> = ({
       return;
     }
 
+    if (bloqueCopiado.instructorId) {
+      avisarSiCompetenciaSobrepasada(bloqueCopiado.competenciaCodigo, bloqueCopiado.instructorNombre);
+    }
     const { id: _id, ...datosBloque } = bloqueCopiado;
     onGuardarBloque({ ...datosBloque, diaSemana: dia, franja });
     mostrarToast(`Bloque pegado en ${dia} • ${franja}`);
@@ -750,6 +773,28 @@ export const HorariosView: React.FC<HorariosProps> = ({
     mostrarToast('Espacio programado como VACANTE — asígnale un instructor cuando esté disponible.');
   };
 
+  // Aviso (no bloqueo): si la competencia ya pasó del 100% de su tiempo —
+  // horas ejecutadas (SofiaPlus) contra horas planeadas, el mismo cálculo de
+  // Seguimiento — se avisa al asignar instructor, pero se deja continuar.
+  const avisarSiCompetenciaSobrepasada = (compCodigo: string, instructorNombre?: string) => {
+    const comp = competenciasPrograma.find(c => c.codigo === compCodigo);
+    if (!comp) return;
+    const regsFicha = registrosHorasEjecutadas.filter(r => r.fichaNumero === ficha.numero_ficha && r.competenciaCodigo === compCodigo);
+    if (regsFicha.length === 0) return;
+    const [item] = calcularComparativoCompetencias(
+      [comp],
+      regsFicha,
+      actividades.filter(a => a.fichaId === ficha.id)
+    );
+    if (!item || item.horasTotalesPlaneadas <= 0 || item.porcentajeEjecucion <= 100) return;
+    alert(
+      `⚠ La competencia ya sobrepasó el 100% de su tiempo.\n\n` +
+      `${comp.codigo} — ${comp.denominacion}\n` +
+      `Horas ejecutadas: ${item.horasEjecutadas} h de ${item.horasTotalesPlaneadas} h planeadas (${item.porcentajeEjecucion}%).\n\n` +
+      `La asignación${instructorNombre ? ` de ${instructorNombre}` : ''} se realizará de todas formas.`
+    );
+  };
+
   // Manejador que valida cruces y perfil antes de asignar
   const handleIntentarAsignarInstructor = (evaluacion: EvaluacionAfinidadInstructor) => {
     const instructor = evaluacion.instructor;
@@ -792,6 +837,8 @@ export const HorariosView: React.FC<HorariosProps> = ({
       );
       return;
     }
+
+    avisarSiCompetenciaSobrepasada(selectedCompetenciaCodigo, instructor.nombreCompleto);
 
     // Si el instructor NO tiene el perfil ni historial, mostrar advertencia interactiva pero permitir continuar
     if (evaluacion.requiereAdvertencia) {
@@ -885,8 +932,10 @@ export const HorariosView: React.FC<HorariosProps> = ({
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
             Espacio Físico / Sede
           </div>
-          <div className="text-xs font-bold text-[#111C2D] truncate">
-            {ficha.ambientePrincipal}
+          {/* Solo informativo: se toma de la ficha (tabla `fichas`, columna
+              ambiente_principal). Se cambia editando la ficha. */}
+          <div className="text-xs font-bold text-[#111C2D] truncate" title={ficha.ambientePrincipal || ''}>
+            {ficha.ambientePrincipal || 'Sin ambiente asignado'}
           </div>
         </div>
 
@@ -1824,6 +1873,7 @@ export const HorariosView: React.FC<HorariosProps> = ({
                         alert(`¡BLOQUEO DE CRUCE PREVENTIVO!\nEl instructor ${inst.nombreCompleto} ya se encuentra asignado el día ${bloqueDetalleModal.diaSemana} en la franja ${bloqueDetalleModal.franja} en la Ficha ${conflicto.fichaNumero} (${conflicto.ambiente}).`);
                         return;
                       }
+                      avisarSiCompetenciaSobrepasada(bloqueDetalleModal.competenciaCodigo, inst.nombreCompleto);
                       onAsignarInstructorABloque(bloqueDetalleModal.id, inst);
                       mostrarToast(`${inst.nombreCompleto} ahora cubre este espacio`);
                       setInstructorParaVacante('');

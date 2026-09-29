@@ -11,11 +11,11 @@ import {
   AprendizJuicio
 } from './types';
 
-export const CENTRO_SENA_DEFAULT: RegionalCentro = {
-  regional: 'Regional Cesar',
-  centro: 'Centro Biotecnológico del Caribe',
-  codigoCentro: '9211',
-  sede: 'Sede Principal - Valledupar'
+export const CENTRO_FORMACION_DEFAULT: RegionalCentro = {
+  regional: 'Regional',
+  centro: 'Centro de Formación',
+  codigoCentro: '0000',
+  sede: 'Sede Principal'
 };
 
 export const PROGRAMAS_INICIALES: ProgramaFormacion[] = [
@@ -38,11 +38,11 @@ export const PROGRAMAS_INICIALES: ProgramaFormacion[] = [
 export const USUARIOS_INICIALES: User[] = [
   {
     id: 'usr_admin',
-    correo: 'admin@misena.edu.co',
-    clave: 'Sena2026*',
+    correo: 'admin@sga.edu.co',
+    clave: 'Sistema2026*',
     nombre_completo: 'Administrador del Sistema',
     rol: 'ADMINISTRADOR',
-    cargo: 'Administrador General del Sistema SENA CBC',
+    cargo: 'Administrador General del Sistema',
     avatar: '/assets/alien_azul_admin.svg'
   }
 ];

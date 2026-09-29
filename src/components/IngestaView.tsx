@@ -31,7 +31,8 @@ import {
   BloqueHorario,
   ActividadSeguimiento,
   ReporteJuiciosFicha,
-  RegistroArchivoSeguimiento
+  RegistroArchivoSeguimiento,
+  TotalesHorasSofia
 } from '../types';
 import { 
   procesarPlaneacionPedagogica, 
@@ -50,7 +51,6 @@ import {
   obtenerReporteDemoJuicios,
   ResultadoProcesamientoJuicios
 } from '../services/juiciosEvaluativosService';
-import { ModalJuiciosEvaluativos } from './ModalJuiciosEvaluativos';
 
 interface IngestaProps {
   currentUser: User;
@@ -65,7 +65,7 @@ interface IngestaProps {
   fichas?: Ficha[];
   onProcesarIngesta: (archivoNombre: string, tipo: AuditoriaIngesta['tipoPlantilla'], filas: number) => void;
   onActualizarCompetenciasYRaps?: (nuevasComp: Competencia[], nuevosRaps: ResultadoAprendizaje[], registrosSeg?: RegistroArchivoSeguimiento[]) => void;
-  onGuardarHorasEjecutadas?: (registros: RegistroHorasEjecutadas[]) => { exito: boolean; mensaje: string } | void;
+  onGuardarHorasEjecutadas?: (registros: RegistroHorasEjecutadas[], totalesSofia?: TotalesHorasSofia) => { exito: boolean; mensaje: string } | void;
   onGuardarJuiciosEvaluativos?: (reporte: ReporteJuiciosFicha) => { exito: boolean; mensaje: string } | void;
   onLimpiarEstructura?: () => void;
   onLimpiarCola: () => void;
@@ -102,7 +102,6 @@ export const IngestaView: React.FC<IngestaProps> = ({
   const [planeacionResult, setPlaneacionResult] = React.useState<ResultadoProcesamientoPlaneacion | null>(null);
   const [horasResult, setHorasResult] = React.useState<ResultadoProcesamientoHorasEjecutadas | null>(null);
   const [juiciosResult, setJuiciosResult] = React.useState<ResultadoProcesamientoJuicios | null>(null);
-  const [modalJuiciosDetalleOpen, setModalJuiciosDetalleOpen] = React.useState(false);
 
   const [tipoArchivoDetectado, setTipoArchivoDetectado] = React.useState<
     'PLANEACION' | 'HORAS_EJECUTADAS' | 'JUICIOS_EVALUATIVOS' | 'SEGUIMIENTO' | null
@@ -324,7 +323,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
     // Integración de Horas Ejecutadas por Instructor
     if (tipoArchivoDetectado === 'HORAS_EJECUTADAS' && horasResult) {
       setTimeout(() => {
-        const resultado = onGuardarHorasEjecutadas ? onGuardarHorasEjecutadas(horasResult.registros) : undefined;
+        const resultado = onGuardarHorasEjecutadas ? onGuardarHorasEjecutadas(horasResult.registros, horasResult.totalesSofia) : undefined;
         setIsProcessing(false);
 
         if (resultado && resultado.exito === false) {
@@ -449,7 +448,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            <span className="px-2 py-0.5 rounded bg-[#E8F5E9] text-[#2E7D32]">Gestión de Cargas Académicas SENA</span>
+            <span className="px-2 py-0.5 rounded bg-[#E8F5E9] text-[#2E7D32]">Gestión de Cargas Académicas</span>
             <span>•</span>
             <span className="text-[#005A8C] font-semibold">Cargas Directas por Módulo</span>
           </div>
@@ -533,7 +532,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
                 type="button"
                 onClick={() => descargarPlantillaPlaneacionExcel(
                   programaSeleccionado,
-                  'ADSO / Formación SENA',
+                  'ADSO / Formación Titulada',
                   competenciasExistentes,
                   []
                 )}
@@ -720,15 +719,6 @@ export const IngestaView: React.FC<IngestaProps> = ({
             </div>
           </div>
           <div className="flex items-center space-x-2 shrink-0">
-            {juiciosResult?.reporte && (
-              <button
-                type="button"
-                onClick={() => setModalJuiciosDetalleOpen(true)}
-                className="px-3 py-1.5 bg-[#6F43C0] hover:bg-[#5b34a6] text-white text-xs font-bold rounded-xl shadow-2xs flex items-center space-x-1"
-              >
-                <span>Ver Juicios SofiaPlus →</span>
-              </button>
-            )}
             {onNavigateToSeguimiento && (
               <button
                 onClick={onNavigateToSeguimiento}
@@ -860,9 +850,9 @@ export const IngestaView: React.FC<IngestaProps> = ({
             <div className="space-y-3">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-3 bg-[#E8F5E9] rounded-xl border border-emerald-200 text-center">
-                  <div className="text-[10px] font-bold text-[#2E7D32] uppercase">H. Ejecutadas</div>
-                  <div className="text-xl font-black text-[#0D631B]">{horasResult.totalHorasEjecutadas} h</div>
-                  <div className="text-[10px] text-slate-500">Total acumulado</div>
+                  <div className="text-[10px] font-bold text-[#2E7D32] uppercase">H. Por Competencia</div>
+                  <div className="text-xl font-black text-[#0D631B]">{Math.round(horasResult.totalHorasEjecutadas)} h</div>
+                  <div className="text-[10px] text-slate-500">Programadas en el reporte</div>
                 </div>
 
                 <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-center">
@@ -884,29 +874,23 @@ export const IngestaView: React.FC<IngestaProps> = ({
                 </div>
               </div>
 
-              {/* Resumen de los primeros registros */}
-              <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/70 max-h-48 overflow-y-auto">
-                <div className="text-[10px] font-bold text-slate-500 uppercase mb-1.5">
-                  Vista previa de horas por instructor:
+              {/* Solo totales: no se listan instructores por nombre. */}
+              {horasResult.totalesSofia && (
+                <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/70 grid grid-cols-3 gap-3 text-center">
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-500 uppercase">Programadas (SofiaPlus)</div>
+                    <div className="text-base font-black text-slate-800">{Math.round(horasResult.totalesSofia.programadas)} h</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-500 uppercase">Ejecutadas (SofiaPlus)</div>
+                    <div className="text-base font-black text-[#0D631B]">{Math.round(horasResult.totalesSofia.ejecutadas)} h</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-bold text-slate-500 uppercase">Pendientes (SofiaPlus)</div>
+                    <div className="text-base font-black text-amber-800">{Math.round(horasResult.totalesSofia.pendientes)} h</div>
+                  </div>
                 </div>
-                <div className="space-y-1 text-[11px]">
-                  {horasResult.registros.slice(0, 8).map((r, i) => (
-                    <div key={i} className="flex items-center justify-between py-1 border-b border-slate-200/60 last:border-0">
-                      <span className="font-semibold text-slate-800 truncate max-w-sm">
-                        {r.instructorNombre}
-                      </span>
-                      <div className="flex items-center space-x-2">
-                        <span className="font-mono text-slate-600 text-[10px] px-1.5 py-0.2 bg-white rounded border border-slate-200">
-                          {r.competenciaCodigo}
-                        </span>
-                        <span className="font-black text-[#0D631B]">
-                          {r.horasEjecutadas} hrs
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -999,43 +983,24 @@ export const IngestaView: React.FC<IngestaProps> = ({
                 )}
               </div>
 
-              {/* Vista previa de aprendices y botón modal */}
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-800 flex items-center space-x-1.5">
-                    <Users className="w-3.5 h-3.5 text-slate-600" />
-                    <span>Muestra de Aprendices en el Reporte ({juiciosResult.reporte.aprendices.slice(0, 5).length} de {juiciosResult.reporte.totalAprendices}):</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setModalJuiciosDetalleOpen(true)}
-                    className="text-xs font-bold text-[#6F43C0] hover:underline flex items-center space-x-1"
-                  >
-                    <span>Ver todos los {juiciosResult.reporte.totalAprendices} aprendices →</span>
-                  </button>
+              {/* Solo totales: por manejo de datos personales, no se muestran
+                  nombres ni documentos de aprendices en esta vista previa. */}
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Competencias evaluadas</div>
+                  <div className="text-base font-black text-slate-800">{juiciosResult.reporte.competenciasEvaluadas.length}</div>
                 </div>
-
-                <div className="space-y-1 text-[11px] max-h-36 overflow-y-auto pr-1">
-                  {juiciosResult.reporte.aprendices.slice(0, 5).map((apr, idx) => (
-                    <div key={idx} className="p-2 rounded-lg bg-white border border-slate-200 flex items-center justify-between gap-2 shadow-2xs">
-                      <div className="min-w-0 flex-1">
-                        <span className="font-mono text-[10px] font-bold text-slate-500 mr-1.5">{apr.documento}</span>
-                        <strong className="text-slate-800">{apr.nombresApellidos}</strong>
-                      </div>
-                      <div className="flex items-center space-x-2 shrink-0">
-                        <span className={`px-2 py-0.2 rounded-full text-[9px] font-bold ${
-                          apr.estadoMatricula === 'EN FORMACION'
-                            ? 'bg-emerald-100 text-emerald-900'
-                            : 'bg-rose-100 text-rose-900'
-                        }`}>
-                          {apr.estadoMatricula}
-                        </span>
-                        <span className="font-mono text-[10px] font-bold text-slate-700">
-                          {apr.juiciosAprobados}/{apr.totalJuicios} ({apr.porcentajeAvance}%)
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                <div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Juicios aprobados</div>
+                  <div className="text-base font-black text-emerald-800">{juiciosResult.reporte.totalJuiciosAprobados}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Juicios por evaluar</div>
+                  <div className="text-base font-black text-amber-800">{juiciosResult.reporte.totalJuiciosPorEvaluar}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Aprendices activos</div>
+                  <div className="text-base font-black text-slate-800">{juiciosResult.reporte.aprendicesActivos} de {juiciosResult.reporte.totalAprendices}</div>
                 </div>
               </div>
             </div>
@@ -1454,7 +1419,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
                   : tipoArchivoDetectado === 'JUICIOS_EVALUATIVOS' && juiciosResult?.reporte
                     ? `✓ Integrar Juicios de Ficha ${juiciosResult.reporte.fichaNumero} (${juiciosResult.reporte.totalRegistros} juicios, ${juiciosResult.reporte.totalAprendices} aprendices)`
                     : tipoArchivoDetectado === 'HORAS_EJECUTADAS' && horasResult
-                    ? `✓ Integrar ${horasResult.totalHorasEjecutadas} Horas Ejecutadas al Seguimiento`
+                    ? `✓ Integrar Horas de la Ficha al Seguimiento (${Math.round(horasResult.totalesSofia?.ejecutadas ?? horasResult.totalHorasEjecutadas)} h ejecutadas)`
                     : tipoArchivoDetectado === 'PLANEACION' && planeacionResult
                     ? planeacionResult.validacionSobrescritura?.esSobrescritura
                       ? `🔄 Confirmar y Sobreescribir Planeación (${planeacionResult.competencias.length} Comp, ${planeacionResult.raps.length} RAPs)`
@@ -1471,7 +1436,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-black text-sm text-[#111C2D]">Auditoría de Ingestas Recientes</h3>
-            <p className="text-xs text-slate-500">Registro trazable de cargues ejecutados en el nodo Regional Cesar</p>
+            <p className="text-xs text-slate-500">Registro trazable de cargues ejecutados en el sistema</p>
           </div>
         </div>
 
@@ -1515,23 +1480,6 @@ export const IngestaView: React.FC<IngestaProps> = ({
         </div>
       </div>
 
-      {/* Modal de Detalle Completo de Juicios Evaluativos */}
-      <ModalJuiciosEvaluativos
-        isOpen={modalJuiciosDetalleOpen}
-        onClose={() => setModalJuiciosDetalleOpen(false)}
-        reporte={juiciosResult?.reporte || null}
-        onSincronizarFicha={(rep) => {
-          const resultado = onGuardarJuiciosEvaluativos ? onGuardarJuiciosEvaluativos(rep) : undefined;
-          setModalJuiciosDetalleOpen(false);
-          if (resultado && resultado.exito === false) {
-            setArchivoErrorMensaje(resultado.mensaje);
-            return;
-          }
-          setArchivoExitoMensaje(
-            resultado?.mensaje || `✓ ¡Ficha ${rep.fichaNumero} sincronizada exitosamente con ${rep.totalAprendices} aprendices y ${rep.totalRegistros} juicios evaluativos!`
-          );
-        }}
-      />
     </div>
   );
 };

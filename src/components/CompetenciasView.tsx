@@ -1,6 +1,7 @@
 import React from 'react';
-import { 
-  BookOpen, 
+import { generarUuid } from '../lib/id';
+import {
+  BookOpen,
   Search, 
   UploadCloud, 
   Download, 
@@ -506,7 +507,7 @@ export const CompetenciasView: React.FC<CompetenciasViewProps> = ({
 
     setUploadNotification({
       tipo: 'info',
-      mensaje: `Planeación Oficial SENA GPFI-F-134 restaurada para ${programaActual?.nombre || activeProgCodigo}.`,
+      mensaje: `Planeación Oficial GPFI-F-134 restaurada para ${programaActual?.nombre || activeProgCodigo}.`,
       detalles: `${demo.competencias.length} competencias y ${demo.raps.length} RAPs sincronizados.`
     });
   };
@@ -519,7 +520,10 @@ export const CompetenciasView: React.FC<CompetenciasViewProps> = ({
     }
 
     const nuevoRap: ResultadoAprendizaje = {
-      id: `rap_${Date.now()}`,
+      // UUID real: resultados_aprendizaje.id es UUID en Supabase — un id con
+      // prefijo de texto (como el `rap_...` que se usaba antes) hacía que el
+      // upsert lo rechazara por completo, en silencio.
+      id: generarUuid(),
       programaCodigo: activeProgCodigo,
       competenciaCodigo: modalNuevoRap.competencia.codigo,
       competenciaDenominacion: modalNuevoRap.competencia.denominacion,
@@ -549,7 +553,7 @@ export const CompetenciasView: React.FC<CompetenciasViewProps> = ({
         <div>
           <div className="flex items-center space-x-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
             <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-black">
-              Diseño Curricular SENA
+              Diseño Curricular
             </span>
             <span>•</span>
             <span>Archivo de Seguimiento</span>
