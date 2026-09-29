@@ -281,6 +281,27 @@ export interface RapSeguimiento {
   fechaActualizacion?: string;
   /** Instructores previos que ya cubrieron este RAP y fueron reemplazados o retirados. */
   historialInstructores?: HistorialInstructorRap[];
+  /**
+   * Asignación hecha desde Horarios que todavía NO está en firme (tiene
+   * menos de HORAS_PARA_FIRMEZA). Si el instructor se quita del horario antes
+   * de ese plazo, fue una prueba/corrección: el RAP vuelve exactamente como
+   * estaba (`previo`) sin dejar rastro en el historial.
+   */
+  asignacionProvisional?: AsignacionProvisionalRap;
+}
+
+export interface AsignacionProvisionalRap {
+  /** Cuándo se asignó (ISO) — a partir de aquí cuenta el plazo de firmeza. */
+  desde: string;
+  /** Cómo estaba el RAP antes de la asignación; null = no tenía registro de seguimiento. */
+  previo: {
+    instructorId?: string;
+    instructorNombre?: string;
+    fuenteInstructor?: 'MANUAL' | 'HORARIO' | 'JUICIOS';
+    estado: EstadoRap;
+    fuenteEstado?: 'MANUAL' | 'JUICIOS';
+    historialInstructores?: HistorialInstructorRap[];
+  } | null;
 }
 
 export type EstadoActividad = 'PENDIENTE' | 'EN EJECUCION' | 'CALIFICADO';

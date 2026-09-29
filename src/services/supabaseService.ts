@@ -712,7 +712,8 @@ export async function fetchRapsSeguimientoFromSupabase(): Promise<RapSeguimiento
       fuenteInstructor: row.fuente_instructor || undefined,
       fuenteEstado: row.fuente_estado || undefined,
       fechaActualizacion: row.fecha_actualizacion || undefined,
-      historialInstructores: Array.isArray(row.historial_instructores) ? row.historial_instructores : undefined
+      historialInstructores: Array.isArray(row.historial_instructores) ? row.historial_instructores : undefined,
+      asignacionProvisional: row.asignacion_provisional && typeof row.asignacion_provisional === 'object' ? row.asignacion_provisional : undefined
     }));
   } catch (err: any) {
     console.error('Excepción al consultar raps_seguimiento en Supabase:', err);
@@ -740,8 +741,11 @@ export async function upsertRapSeguimientoInSupabase(item: RapSeguimiento): Prom
       fuente_instructor: item.fuenteInstructor || null,
       fuente_estado: item.fuenteEstado || null,
       fecha_actualizacion: item.fechaActualizacion || new Date().toISOString(),
-      historial_instructores: item.historialInstructores && item.historialInstructores.length > 0 ? item.historialInstructores : []
-    };
+      historial_instructores: item.historialInstructores && item.historialInstructores.length > 0 ? item.historialInstructores : [],
+      // Requiere 20260929g (columna asignacion_provisional). Si aún no existe,
+      // se reintenta sin ella más abajo para no perder el seguimiento.
+      asignacion_provisional: item.asignacionProvisional || null
+    } as Record<string, any>;
 
     // onConflict por (ficha_id, competencia_codigo, rap_codigo): el código de
     // RAP (p.ej. "RAP 01") se reinicia en cada competencia, así que NO es
@@ -760,6 +764,14 @@ export async function upsertRapSeguimientoInSupabase(item: RapSeguimiento): Prom
     // en este navegador), la llave foránea rechazaba TODO el registro y el
     // seguimiento se perdía. Se guarda igual, con el nombre del instructor
     // pero sin el enlace por id.
+    if (error && (error.code === 'PGRST204' || /asignacion_provisional/.test(error.message || ''))) {
+      delete payload.asignacion_provisional;
+      ({ data, error } = await supabase
+        .from('raps_seguimiento')
+        .upsert([payload], { onConflict: 'ficha_id,competencia_codigo,rap_codigo' })
+        .select());
+    }
+
     if (error && error.code === '23503' && (error.message || '').includes('instructor')) {
       ({ data, error } = await supabase
         .from('raps_seguimiento')

@@ -116,7 +116,8 @@ import {
 import { 
   caracterizarInstructoresDesdeJuicios,
   caracterizarInstructoresDesdeHoras,
-  crearOEnriquecerInstructoresDesdeHoras
+  crearOEnriquecerInstructoresDesdeHoras,
+  aplicarPerfilesPorCompetencias
 } from './services/instructorRecomendacionService';
 import { emparejarJuicioConCatalogo, matchCompetencia } from './services/cruceJuiciosService';
 import { 
@@ -158,6 +159,7 @@ import {
   AUDITORIA_SISTEMA_INICIAL
 } from './mockData';
 import { generarUuid } from './lib/id';
+import { esProvisionalVigente, restaurarAntesDeProvisional, fotoPrevia } from './lib/firmezaSeguimiento';
 
 export default function App() {
   // Estado de Usuarios Registrados en el Sistema (con persistencia local)
@@ -883,7 +885,7 @@ export default function App() {
         setRapsSeguimiento(prev => {
           const merged = [...prev];
           for (const dbSeg of dbRapsSeguimiento) {
-            const index = merged.findIndex(s => s.id === dbSeg.id || (s.fichaId === dbSeg.fichaId && s.rapCodigo === dbSeg.rapCodigo));
+            const index = merged.findIndex(s => s.id === dbSeg.id || (s.fichaId === dbSeg.fichaId && s.competenciaCodigo === dbSeg.competenciaCodigo && s.rapCodigo === dbSeg.rapCodigo));
             if (index >= 0) {
               merged[index] = dbSeg;
             } else {
@@ -1921,6 +1923,18 @@ export default function App() {
   //  (3) nunca crea instructores: solo enriquece a los que ya existen;
   //  (4) cada cargue REEMPLAZA las horas previas de esa ficha (el reporte es
   //      acumulado) y se guarda en Supabase (horas_ejecutadas_ficha).
+  // Sube a Supabase el perfil recalculado de instructores que YA existían
+  // (los nuevos se insertan con su perfil completo en su propio flujo).
+  const actualizarPerfilesEnSupabase = (lista: Instructor[]) => {
+    if (lista.length === 0) return;
+    (async () => {
+      for (const inst of lista) {
+        const r = await updateInstructorInSupabase(inst.id, { perfilTecnico: inst.perfilTecnico, especialidad: inst.especialidad });
+        if (!r.success) console.error(`No se pudo actualizar en Supabase el perfil de ${inst.nombreCompleto}:`, r.error);
+      }
+    })();
+  };
+
   const handleGuardarHorasEjecutadas = (
     nuevosRegistros: RegistroHorasEjecutadas[],
     totalesSofia?: TotalesHorasSofia
@@ -1992,9 +2006,15 @@ export default function App() {
 
     // Instructores: se enriquecen los existentes y se CREAN los que no estén
     // en la planta (igual que en Juicios Evaluativos), sin documento.
-    const { instructores: instructoresActualizados, nuevos: instructoresNuevos } =
-      crearOEnriquecerInstructoresDesdeHoras(registrosFicha, instructores);
+    const horasInst = crearOEnriquecerInstructoresDesdeHoras(registrosFicha, instructores);
+    // Perfil armado según las competencias que cada instructor orienta
+    // (solo para perfiles puestos por el sistema; uno escrito a mano no se toca).
+    const perfilesHoras = aplicarPerfilesPorCompetencias(horasInst.instructores);
+    const instructoresActualizados = perfilesHoras.instructores;
+    const idsNuevosHoras = new Set(horasInst.nuevos.map(n => n.id));
+    const instructoresNuevos = instructoresActualizados.filter(i => idsNuevosHoras.has(i.id));
     setInstructores(instructoresActualizados);
+    actualizarPerfilesEnSupabase(perfilesHoras.cambiados.filter(i => !idsNuevosHoras.has(i.id)));
 
     // Guardar en Supabase (primero los instructores nuevos)
     (async () => {
@@ -2073,8 +2093,14 @@ export default function App() {
 
     // 1) Auto-crear/enriquecer instructores detectados como evaluadores en
     // SofiaPlus (sin documento, sin cuenta de usuario, nunca como líder).
-    const resultadoInstructores = caracterizarInstructoresDesdeJuicios(reporte, instructores);
+    const resultadoInstructoresBase = caracterizarInstructoresDesdeJuicios(reporte, instructores);
+    // Perfil armado según las competencias que cada instructor ha evaluado
+    // (solo para perfiles puestos por el sistema; uno escrito a mano no se toca).
+    const perfilesJuicios = aplicarPerfilesPorCompetencias(resultadoInstructoresBase.instructores);
+    const resultadoInstructores = { ...resultadoInstructoresBase, instructores: perfilesJuicios.instructores };
     setInstructores(resultadoInstructores.instructores);
+    const idsPreviosPerfil = new Set(instructores.map(i => i.id));
+    actualizarPerfilesEnSupabase(perfilesJuicios.cambiados.filter(i => idsPreviosPerfil.has(i.id)));
 
     // 2) Emparejar cada (competencia, RAP) del archivo contra el catálogo
     // real y agregar, por RAP real, cuántos aprendices activos fueron
@@ -2414,14 +2440,23 @@ export default function App() {
           s.competenciaCodigo === compCodigoBloque &&
           s.rapCodigo === rapCod
         );
-        const anterior = idx >= 0 ? nuevoSeg[idx] : undefined;
+        const registroActual = idx >= 0 ? nuevoSeg[idx] : undefined;
+        const mismoInstructor = !!bloque.instructorId && !!registroActual?.instructorNombre &&
+          registroActual.instructorNombre === bloque.instructorNombre;
 
-        // Si había un instructor DISTINTO cubriendo este RAP (por horario o
-        // manual) y ahora llega otro, o el bloque queda vacante, se cierra su
-        // paso en el historial — nunca se borra silenciosamente.
+        // Asignación PROVISIONAL (menos de HORAS_PARA_FIRMEZA): si ahora llega
+        // otro instructor o el espacio queda vacante, la anterior fue una
+        // prueba/corrección — se parte de cómo estaba el RAP ANTES de ella,
+        // sin dejarla en el historial.
+        const deshacerProvisional = !mismoInstructor && registroActual?.fuenteInstructor === 'HORARIO' && esProvisionalVigente(registroActual);
+        const anterior = deshacerProvisional ? restaurarAntesDeProvisional(registroActual!) : registroActual;
+
+        // Si había un instructor EN FIRME distinto cubriendo este RAP y ahora
+        // llega otro, o el bloque queda vacante, se cierra su paso en el
+        // historial — nunca se borra silenciosamente.
         const huboCambioDeInstructor = !!anterior?.instructorNombre &&
           anterior.instructorNombre !== bloque.instructorNombre;
-        const historialActualizado: HistorialInstructorRap[] = huboCambioDeInstructor
+        let historialActualizado: HistorialInstructorRap[] = huboCambioDeInstructor
           ? [
               ...(anterior?.historialInstructores || []),
               {
@@ -2434,14 +2469,45 @@ export default function App() {
             ]
           : (anterior?.historialInstructores || []);
 
+        // Mover un bloque = liberarlo y volverlo a crear: si el MISMO
+        // instructor acaba de salir de este RAP (hace menos de 2 min), no fue
+        // un retiro real — se quita esa marca y se conserva su firmeza.
+        let esMovimiento = false;
+        const ultimo = historialActualizado[historialActualizado.length - 1];
+        if (bloque.instructorId && !anterior?.instructorNombre && ultimo &&
+            ultimo.instructorNombre === bloque.instructorNombre &&
+            (ultimo.motivo === 'FIN_HORARIO' || ultimo.motivo === 'VACANTE_HORARIO') &&
+            Date.now() - new Date(ultimo.fechaFin).getTime() < 2 * 60 * 1000) {
+          historialActualizado = historialActualizado.slice(0, -1);
+          esMovimiento = true;
+        }
+
         // Un bloque vacante nunca debe forzar EN_EJECUCION; si ya estaba
         // CALIFICADO/SIN_CALIFICAR (juicio evaluativo real), eso no se toca.
         const estadoResultante: EstadoRap = bloque.instructorId
           ? (!anterior || anterior.estado === 'PENDIENTE' ? 'EN_EJECUCION' : anterior.estado)
           : (anterior && anterior.estado !== 'PENDIENTE' && anterior.estado !== 'EN_EJECUCION' ? anterior.estado : 'PENDIENTE');
 
+        // Firmeza: un instructor nuevo en el RAP queda provisional durante
+        // HORAS_PARA_FIRMEZA; el mismo instructor en otro bloque conserva su
+        // condición; un espacio vacante no tiene nada que confirmar.
+        const vuelveElQueEstabaEnFirme = deshacerProvisional && !!anterior?.instructorNombre &&
+          anterior.instructorNombre === bloque.instructorNombre;
+        const asignacionProvisional = !bloque.instructorId || esMovimiento || vuelveElQueEstabaEnFirme
+          ? (vuelveElQueEstabaEnFirme ? anterior?.asignacionProvisional : undefined)
+          : mismoInstructor
+            ? registroActual?.asignacionProvisional
+            : {
+                desde: new Date().toISOString(),
+                // Si se reemplaza una provisional, se recuerda el estado de
+                // ANTES de la primera, para poder volver a él.
+                previo: deshacerProvisional
+                  ? (registroActual!.asignacionProvisional!.previo)
+                  : fotoPrevia(registroActual)
+              };
+
         const entradaFinal: RapSeguimiento = {
-          id: anterior?.id || generarUuid(),
+          id: registroActual?.id || generarUuid(),
           fichaId: bloque.fichaId,
           fichaNumero: fichaNum,
           programaCodigo: progCod,
@@ -2455,6 +2521,7 @@ export default function App() {
           fuenteEstado: anterior?.fuenteEstado,
           estado: estadoResultante,
           historialInstructores: historialActualizado,
+          asignacionProvisional,
           fechaActualizacion: new Date().toISOString()
         };
 
@@ -2656,8 +2723,38 @@ export default function App() {
             // instructor lo cambió manualmente después, esa decisión manual
             // prevalece y no se toca.
             if (idx >= 0 && nuevoSeg[idx].fuenteInstructor === 'HORARIO') {
-              // Si el RAP tenía instructor al momento de liberar el bloque, su
-              // paso se cierra en el historial en vez de borrarse sin dejar rastro.
+              // Asignación todavía PROVISIONAL (prueba/corrección): el RAP
+              // vuelve exactamente como estaba antes, sin dejar rastro.
+              if (esProvisionalVigente(nuevoSeg[idx])) {
+                const restaurado = restaurarAntesDeProvisional(nuevoSeg[idx]);
+                // Si antes lo cubría OTRO instructor desde Horario, ese
+                // tampoco tiene ya bloque: se cierra su paso normalmente.
+                if (restaurado.fuenteInstructor === 'HORARIO' && restaurado.instructorNombre) {
+                  nuevoSeg[idx] = {
+                    ...restaurado,
+                    instructorId: undefined,
+                    instructorNombre: undefined,
+                    fuenteInstructor: undefined,
+                    estado: restaurado.estado === 'EN_EJECUCION' ? 'PENDIENTE' : restaurado.estado,
+                    historialInstructores: [
+                      ...(restaurado.historialInstructores || []),
+                      {
+                        instructorId: restaurado.instructorId,
+                        instructorNombre: restaurado.instructorNombre,
+                        trimestre: bloqueAEliminar.trimestre,
+                        fechaFin: new Date().toISOString(),
+                        motivo: 'FIN_HORARIO' as const
+                      }
+                    ]
+                  };
+                } else {
+                  nuevoSeg[idx] = restaurado;
+                }
+                itemsRevertidos.push(nuevoSeg[idx]);
+                return;
+              }
+              // Si el RAP tenía instructor EN FIRME al momento de liberar el
+              // bloque, su paso se cierra en el historial en vez de borrarse.
               const previo = nuevoSeg[idx];
               const historialActualizado = previo.instructorNombre
                 ? [
@@ -2680,6 +2777,7 @@ export default function App() {
                 estado: 'PENDIENTE',
                 fuenteEstado: undefined,
                 historialInstructores: historialActualizado,
+                asignacionProvisional: undefined,
                 fechaActualizacion: new Date().toISOString()
               };
               itemsRevertidos.push(nuevoSeg[idx]);
@@ -2712,7 +2810,12 @@ export default function App() {
     // en el upsert a Supabase (antes este cambio solo se guardaba en localStorage,
     // por lo que un Coordinador y un Auxiliar en equipos distintos veían datos
     // distintos del seguimiento por RAP de una misma ficha).
-    const itemFinal: RapSeguimiento = { ...itemActualizado, fechaActualizacion: new Date().toISOString() };
+    const itemFinal: RapSeguimiento = {
+      ...itemActualizado,
+      // Un cambio manual o por Juicios deja el RAP en firme.
+      ...(itemActualizado.fuenteInstructor !== 'HORARIO' ? { asignacionProvisional: undefined } : {}),
+      fechaActualizacion: new Date().toISOString()
+    };
 
     setRapsSeguimiento(prev => {
       // El código de RAP (p.ej. "RAP 01") se reinicia en cada competencia, así

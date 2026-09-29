@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { calcularComparativoCompetencias, ComparativoCompetenciaItem } from '../services/horasEjecutadasService';
 import { generarUuid } from '../lib/id';
+import { esProvisionalVigente, fechaFirmeza } from '../lib/firmezaSeguimiento';
 
 export interface RapSeguimientoData {
   estado: EstadoRap;
@@ -24,6 +25,8 @@ export interface RapSeguimientoData {
   /** true cuando el RAP quedó programado en Horarios pero aún sin instructor. */
   vacante?: boolean;
   historialInstructores?: HistorialInstructorRap[];
+  /** Si la asignación desde Horario aún es provisional: cuándo queda en firme (ISO). */
+  firmeDesde?: string;
 }
 
 interface UseSeguimientoCurricularParams {
@@ -193,7 +196,11 @@ export function useSeguimientoCurricular({
         instructorId: seg.instructorId,
         fuente: seg.fuenteInstructor || seg.fuenteEstado || 'MANUAL',
         vacante: seg.fuenteInstructor === 'HORARIO' && !seg.instructorId,
-        historialInstructores: seg.historialInstructores
+        historialInstructores: seg.historialInstructores,
+        // Asignación desde Horario que aún no queda en firme
+        firmeDesde: seg.fuenteInstructor === 'HORARIO' && seg.instructorId && esProvisionalVigente(seg)
+          ? fechaFirmeza(seg)?.toISOString()
+          : undefined
       };
     }
 

@@ -988,9 +988,17 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
                                                           ⏳ Programado en Horario — Vacante (falta instructor)
                                                         </span>
                                                       )}
-                                                      {rapData.fuente === 'HORARIO' && !rapData.vacante && (
+                                                      {rapData.fuente === 'HORARIO' && !rapData.vacante && !rapData.firmeDesde && (
                                                         <span className="text-orange-600 font-medium">
                                                           📅 Asignado desde Horario
+                                                        </span>
+                                                      )}
+                                                      {rapData.fuente === 'HORARIO' && !rapData.vacante && rapData.firmeDesde && (
+                                                        <span
+                                                          className="text-sky-700 font-medium"
+                                                          title="Si el instructor se quita del horario antes de esta fecha, se toma como prueba y no queda en el historial."
+                                                        >
+                                                          🕓 Provisional — queda en firme el {new Date(rapData.firmeDesde).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                                                         </span>
                                                       )}
                                                       {rapData.fuente === 'JUICIOS' && (

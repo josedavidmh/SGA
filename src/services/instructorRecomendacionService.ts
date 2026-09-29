@@ -22,77 +22,206 @@ export interface EvaluacionAfinidadInstructor {
   motivoAdvertencia?: string;
 }
 
+// ---------------------------------------------------------------------------
+// ÁREAS DE FORMACIÓN — una sola tabla que sirve para dos cosas:
+//  1) Armar el perfil de un instructor a partir de las competencias que ha
+//     orientado/evaluado (archivos de Juicios y de Horas por competencia).
+//  2) Decidir si el perfil de un instructor es afín a una competencia en el
+//     lienzo de Horarios.
+// El orden importa: se toma la PRIMERA área que coincida (p.ej. "actividad
+// física" antes que "física", "investigación" antes que "software").
+// ---------------------------------------------------------------------------
+
+const sinTildesMin = (t: string) => (t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+interface ContextoPerfil {
+  esIngeniero: boolean;
+  tienePosgrado: boolean;
+}
+
+interface AreaFormacion {
+  clave: string;
+  /** Etiqueta que se escribe en el perfil del instructor */
+  etiqueta: string;
+  /** ¿La competencia (texto sin tildes) pertenece a esta área? */
+  esDeLaCompetencia: (comp: string) => boolean;
+  /** ¿El perfil del instructor (texto sin tildes) sirve para esta área? */
+  perfilAfin: (inst: string, ctx: ContextoPerfil) => boolean;
+}
+
+const tiene = (t: string, ...claves: (string | RegExp)[]) =>
+  claves.some(c => (typeof c === 'string' ? t.includes(c) : c.test(t)));
+
+// "física" como ciencia (no "educación física" / "actividad física")
+const FISICA_CIENCIA = /(?<!educacion |actividad |cultura |condicion |acondicionamiento )fisic/;
+
+const AREAS_FORMACION: AreaFormacion[] = [
+  {
+    clave: 'investigacion',
+    etiqueta: 'Investigación formativa',
+    esDeLaCompetencia: c => tiene(c, 'investigacion', '240201530'),
+    perfilAfin: (i, ctx) => ctx.esIngeniero || ctx.tienePosgrado || tiene(i, 'investig', 'metodolog', 'cientific')
+  },
+  {
+    clave: 'ingles',
+    etiqueta: 'Bilingüismo (inglés)',
+    esDeLaCompetencia: c => tiene(c, 'ingles', 'inglesa', 'biling', '240202501'),
+    perfilAfin: i => tiene(i, 'ingles', 'idiomas', 'lenguas', 'biling', 'filolog')
+  },
+  {
+    clave: 'actividad_fisica',
+    etiqueta: 'Educación física y hábitos saludables',
+    esDeLaCompetencia: c => tiene(c, 'actividad fisica', 'habitos saludables', 'cultura fisica', 'acondicionamiento fisico', 'psicomotri', 'pausas activas', '230101507'),
+    perfilAfin: i => tiene(i, 'educacion fisica', 'actividad fisica', 'cultura fisica', 'deport', 'recreacion', 'entrenamiento', 'fisioterap')
+  },
+  {
+    clave: 'matematicas',
+    etiqueta: 'Matemáticas y razonamiento cuantitativo',
+    esDeLaCompetencia: c => tiene(c, 'matematic', 'cuantitativ', '240201528'),
+    perfilAfin: (i, ctx) => ctx.esIngeniero || tiene(i, 'matematic', 'estadistic', FISICA_CIENCIA, 'ciencias exactas', 'sistemas')
+  },
+  {
+    clave: 'fisica',
+    etiqueta: 'Física y ciencias naturales',
+    esDeLaCompetencia: c => tiene(c, FISICA_CIENCIA, 'ciencias naturales', '220201501'),
+    perfilAfin: (i, ctx) => ctx.esIngeniero || tiene(i, FISICA_CIENCIA, 'ciencias naturales', 'quimic', 'biolog')
+  },
+  {
+    clave: 'derecho',
+    etiqueta: 'Derechos fundamentales del trabajo',
+    esDeLaCompetencia: c => tiene(c, 'derechos fundamentales', 'derecho del trabajo', 'derechos humanos', 'ciudadania laboral', '210201501'),
+    perfilAfin: i => tiene(i, 'derech', 'abogad', 'juridic', 'laboral', 'ciencias sociales', 'trabajo social')
+  },
+  {
+    clave: 'etica',
+    etiqueta: 'Ética y cultura de paz',
+    esDeLaCompetencia: c => tiene(c, 'etica', 'eticos', 'low murtra', 'cultura de paz', 'interaccion idonea', '240201526'),
+    perfilAfin: i => tiene(i, 'etica', 'humanidades', 'psicolog', 'trabajo social', 'filosof', 'social', 'pedagog')
+  },
+  {
+    clave: 'comunicacion',
+    etiqueta: 'Comunicación',
+    esDeLaCompetencia: c => tiene(c, 'comunicacion', 'comunicativ', '240201524'),
+    perfilAfin: i => tiene(i, 'comunicac', 'periodism', 'lengua', 'letras', 'humanidades', 'lingüist', 'linguist')
+  },
+  {
+    clave: 'emprendimiento',
+    etiqueta: 'Emprendimiento y gestión empresarial',
+    esDeLaCompetencia: c => tiene(c, 'emprendedora', 'emprendimiento', 'empresarial', 'plan de negocio', 'idea de negocio', '240201529'),
+    perfilAfin: i => tiene(i, 'emprendimiento', 'empresarial', 'administrac', 'gestion', 'negocios', 'econom', 'contad', 'mercadeo')
+  },
+  {
+    clave: 'ambiental',
+    etiqueta: 'Gestión ambiental y SST',
+    esDeLaCompetencia: c => tiene(c, 'ambiental', /\bsst\b/, 'seguridad y salud', 'recursos naturales', '220601501'),
+    perfilAfin: i => tiene(i, 'ambiental', /\bsst\b/, 'seguridad y salud', 'ecolog', 'ocupacional', 'sanitari')
+  },
+  {
+    clave: 'informatica',
+    etiqueta: 'Herramientas informáticas (TIC)',
+    esDeLaCompetencia: c => tiene(c, 'herramientas informaticas', 'informatica', /\btic\b/, 'herramientas digitales', 'ofimatic'),
+    perfilAfin: i => tiene(i, 'sistemas', 'informatic', 'software', /\btic\b/, 'computac', 'tecnolog', 'telematic', 'electronic')
+  },
+  {
+    clave: 'software',
+    etiqueta: 'Desarrollo de software',
+    esDeLaCompetencia: c => tiene(c, 'software', 'requisitos', 'algoritm', 'base de datos', 'modelo de datos', 'interfaz', 'front-end', 'back-end',
+      'tecnologia de la informacion', 'sistema de informacion', 'programacion', 'codificar', '2205010'),
+    perfilAfin: i => tiene(i, 'sistemas', 'software', 'informatic', 'programacion', 'desarrollo de software', 'desarrollador', /\bti\b/, /\btic\b/, 'computac', 'telematic')
+  }
+];
+
+/** Área de formación de una competencia (por código y/o denominación), o null si no se reconoce. */
+export function detectarAreaCompetencia(textoCompetencia: string): AreaFormacion | null {
+  const c = sinTildesMin(textoCompetencia);
+  if (!c.trim()) return null;
+  return AREAS_FORMACION.find(a => a.esDeLaCompetencia(c)) || null;
+}
+
+const contextoPerfil = (instTexto: string): ContextoPerfil => ({
+  esIngeniero: instTexto.includes('ingenier') || /\bing\b/.test(instTexto),
+  tienePosgrado: tiene(instTexto, 'maestr', 'magister', /\bmsc\b/, /\bm\.sc\b/, 'doctor', /\bphd\b/)
+});
+
+/** Prefijo que identifica un perfil ARMADO por el sistema (se puede recalcular). */
+export const PREFIJO_PERFIL_AUTOMATICO = 'Perfil por competencias:';
+
+/** Perfiles genéricos/automáticos anteriores que también se pueden reemplazar. */
+const PERFILES_GENERICOS = new Set([
+  '', 'instructor tecnico', 'instructor de formacion profesional integral', 'area tecnica', 'formacion profesional',
+  'ingeniero de sistemas / desarrollador de software', 'licenciado en idiomas - bilinguismo',
+  'licenciado en matematicas / estadistica', 'licenciado en ciencias naturales / fisica',
+  'profesional en humanidades / psicologia / trabajo social', 'comunicador social / especialista en comunicacion',
+  'especialista en sst & gestion ambiental', 'administrador de empresas / economista',
+  'tecnologo / ingeniero de sistemas tic', 'investigador / magister en metodologia cientifica'
+]);
+
+/** ¿El perfil de este instructor lo puso el sistema (y por tanto se puede recalcular)? */
+export function esPerfilAutomatico(inst: Pick<Instructor, 'perfilTecnico'>): boolean {
+  const p = (inst.perfilTecnico || '').trim();
+  return p.startsWith(PREFIJO_PERFIL_AUTOMATICO) || PERFILES_GENERICOS.has(sinTildesMin(p));
+}
+
 /**
- * Infiere la especialidad profesional basada en el nombre de la competencia trabajada
+ * Arma el perfil (perfilTecnico + especialidad) a partir de TODAS las
+ * competencias que el instructor ha orientado/evaluado. Las áreas se ordenan
+ * por cuántas competencias de cada una tiene. Devuelve null si ninguna
+ * competencia se pudo clasificar (p.ej. solo inducción o etapa práctica).
  */
-function inferirEspecialidadPorCompetencia(competenciaDenom: string): { perfilTecnico: string; especialidad: string } {
-  const comp = competenciaDenom.toLowerCase();
-
-  if (comp.includes('software') || comp.includes('requisitos') || comp.includes('diseñar') || comp.includes('desarrollar') || comp.includes('algoritmos') || comp.includes('datos') || comp.includes('ti')) {
-    return {
-      perfilTecnico: 'Ingeniero de Sistemas / Desarrollador de Software',
-      especialidad: 'Ingeniería de Software & Arquitectura TI'
-    };
-  }
-  if (comp.includes('inglés') || comp.includes('inglesa') || comp.includes('biling')) {
-    return {
-      perfilTecnico: 'Licenciado en Idiomas - Bilingüismo',
-      especialidad: 'Bilingüismo & Comunicación en Lengua Inglesa'
-    };
-  }
-  if (comp.includes('matemática') || comp.includes('cuantitativo') || comp.includes('matematica')) {
-    return {
-      perfilTecnico: 'Licenciado en Matemáticas / Estadística',
-      especialidad: 'Razonamiento Cuantitativo & Matemáticas Aplicadas'
-    };
-  }
-  if (comp.includes('física') || comp.includes('fisica') || comp.includes('naturales')) {
-    return {
-      perfilTecnico: 'Licenciado en Ciencias Naturales / Física',
-      especialidad: 'Física Aplicada & Métodos Científicos'
-    };
-  }
-  if (comp.includes('ética') || comp.includes('etica') || comp.includes('low murtra') || comp.includes('paz') || comp.includes('integral')) {
-    return {
-      perfilTecnico: 'Profesional en Humanidades / Psicología / Trabajo Social',
-      especialidad: 'Ética Profesional & Cultura de Paz'
-    };
-  }
-  if (comp.includes('comunicación') || comp.includes('comunicacion') || comp.includes('eficaces')) {
-    return {
-      perfilTecnico: 'Comunicador Social / Especialista en Comunicación',
-      especialidad: 'Procesos de Comunicación Organizacional'
-    };
-  }
-  if (comp.includes('ambiental') || comp.includes('sst') || comp.includes('seguridad y salud') || comp.includes('recursos naturales')) {
-    return {
-      perfilTecnico: 'Especialista en SST & Gestión Ambiental',
-      especialidad: 'Seguridad y Salud en el Trabajo & Medio Ambiente'
-    };
-  }
-  if (comp.includes('emprendedora') || comp.includes('emprendimiento') || comp.includes('negocio')) {
-    return {
-      perfilTecnico: 'Administrador de Empresas / Economista',
-      especialidad: 'Emprendimiento, Modelos de Negocio & Finanzas'
-    };
-  }
-  if (comp.includes('informática') || comp.includes('tic') || comp.includes('digitales')) {
-    return {
-      perfilTecnico: 'Tecnólogo / Ingeniero de Sistemas TIC',
-      especialidad: 'Herramientas Digitales & Tecnologías de la Información'
-    };
-  }
-  if (comp.includes('investigación') || comp.includes('investigacion')) {
-    return {
-      perfilTecnico: 'Investigador / Magíster en Metodología Científica',
-      especialidad: 'Investigación Aplicada & Desarrollo Tecnológico'
-    };
-  }
-
+export function construirPerfilDesdeCompetencias(competencias: string[]): { perfilTecnico: string; especialidad: string } | null {
+  const votos = new Map<string, { area: AreaFormacion; n: number; orden: number }>();
+  const vistas = new Set<string>();
+  competencias.forEach(txt => {
+    const clave = sinTildesMin(txt).trim();
+    if (!clave || vistas.has(clave)) return;
+    vistas.add(clave);
+    const area = detectarAreaCompetencia(txt);
+    if (!area) return;
+    const prev = votos.get(area.clave);
+    if (prev) prev.n += 1;
+    else votos.set(area.clave, { area, n: 1, orden: AREAS_FORMACION.indexOf(area) });
+  });
+  if (votos.size === 0) return null;
+  const etiquetas = Array.from(votos.values())
+    .sort((a, b) => b.n - a.n || a.orden - b.orden)
+    .map(v => v.area.etiqueta);
+  let especialidad = etiquetas.slice(0, 2).join(' · ');
+  if (especialidad.length > 150) especialidad = especialidad.slice(0, 147) + '...';
   return {
+    perfilTecnico: `${PREFIJO_PERFIL_AUTOMATICO} ${etiquetas.join(' · ')}`,
+    especialidad
+  };
+}
+
+/** Compatibilidad: perfil a partir de UNA competencia. */
+function inferirEspecialidadPorCompetencia(competenciaDenom: string): { perfilTecnico: string; especialidad: string } {
+  return construirPerfilDesdeCompetencias([competenciaDenom]) || {
     perfilTecnico: 'Instructor de Formación Profesional Integral',
     especialidad: 'Formación Profesional'
   };
+}
+
+/**
+ * Recalcula el perfil de los instructores cuyo perfil lo puso el sistema
+ * (nunca toca un perfil escrito a mano), según las competencias que tienen
+ * en su experiencia. Devuelve la lista actualizada y los que cambiaron.
+ */
+export function aplicarPerfilesPorCompetencias(instructores: Instructor[]): { instructores: Instructor[]; cambiados: Instructor[] } {
+  const cambiados: Instructor[] = [];
+  const lista = instructores.map(inst => {
+    if (!esPerfilAutomatico(inst)) return inst;
+    const exp = [
+      ...(inst.competenciasExperiencia || []),
+      ...(inst.historialEvaluaciones || []).map(h => h.competenciaDenominacion || h.competenciaCodigo || '')
+    ];
+    const perfil = construirPerfilDesdeCompetencias(exp);
+    if (!perfil) return inst;
+    if (perfil.perfilTecnico === inst.perfilTecnico && perfil.especialidad === inst.especialidad) return inst;
+    const actualizado = { ...inst, ...perfil };
+    cambiados.push(actualizado);
+    return actualizado;
+  });
+  return { instructores: lista, cambiados };
 }
 
 const COLORES_AVATAR = [
@@ -376,137 +505,16 @@ export function caracterizarInstructoresDesdeHoras(
 export function verificarAfinidadPerfil(instructor: Instructor, competencia: Competencia): boolean {
   // Se comparan sin tildes para que "Física"/"fisica" o "Ingeniería"/"ingenieria"
   // coincidan igual, sin importar cómo se haya escrito el perfil del instructor.
-  const sinTildes = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const compTexto = sinTildes(`${competencia.codigo} ${competencia.denominacion} ${competencia.tipo}`);
-  const instTexto = sinTildes(`${instructor.perfilTecnico || ''} ${instructor.especialidad || ''}`);
+  const instTexto = sinTildesMin(`${instructor.perfilTecnico || ''} ${instructor.especialidad || ''}`);
+  const ctx = contextoPerfil(instTexto);
 
-  // Perfiles de formación amplia: un ingeniero puede orientar matemáticas,
-  // física e investigación; un magíster/doctor puede orientar investigación.
-  const esIngeniero = instTexto.includes('ingenier') || /\bing\b/.test(instTexto);
-  const tienePosgradoInvestigacion =
-    instTexto.includes('maestr') || instTexto.includes('magister') || /\bmsc\b|\bm\.sc\b/.test(instTexto) ||
-    instTexto.includes('doctor') || /\bphd\b/.test(instTexto) || instTexto.includes('investig');
+  // Un ingeniero puede orientar matemáticas, física e investigación; un
+  // magíster/doctor puede orientar investigación (ver AREAS_FORMACION).
+  const area = detectarAreaCompetencia(`${competencia.codigo} ${competencia.denominacion}`);
+  if (area) return area.perfilAfin(instTexto, ctx);
 
-  // Investigación (competencia transversal de investigación formativa)
-  const esInvestigacion = compTexto.includes('investigacion') || compTexto.includes('240201530');
-  if (esInvestigacion) {
-    return esIngeniero || tienePosgradoInvestigacion || instTexto.includes('metodolog') || instTexto.includes('cientific');
-  }
-
-  // 1. Competencias Técnicas de Software / TI
-  const esSoftware = compTexto.includes('software') || 
-                     compTexto.includes('desarrollar') || 
-                     compTexto.includes('requisitos') || 
-                     compTexto.includes('algoritmos') || 
-                     compTexto.includes('disenar la solucion') || 
-                     compTexto.includes('datos') || 
-                     compTexto.includes('interfaz') || 
-                     compTexto.includes('220501096') || 
-                     compTexto.includes('220501092') || 
-                     compTexto.includes('220501093') || 
-                     compTexto.includes('220501094') || 
-                     compTexto.includes('220501095');
-
-  if (esSoftware) {
-    return instTexto.includes('sistemas') || 
-           instTexto.includes('software') || 
-           instTexto.includes('informatica') || 
-           instTexto.includes('programacion') || 
-           instTexto.includes('desarrollo') || 
-           /\bti\b|\btic\b/.test(instTexto) || 
-           instTexto.includes('computacion');
-  }
-
-  // 2. Bilingüismo / Inglés
-  const esIngles = compTexto.includes('ingles') || 
-                   compTexto.includes('inglesa') || 
-                   compTexto.includes('biling') || 
-                   compTexto.includes('240202501');
-  if (esIngles) {
-    return instTexto.includes('ingles') || 
-           instTexto.includes('idiomas') || 
-           instTexto.includes('lenguas') || 
-           instTexto.includes('biling') || 
-           instTexto.includes('filologia');
-  }
-
-  // 3. Matemáticas / Cuantitativo
-  const esMatematicas = compTexto.includes('matematica') || 
-                        compTexto.includes('cuantitativo') || 
-                        compTexto.includes('240201528');
-  if (esMatematicas) {
-    return instTexto.includes('matematic') || 
-           instTexto.includes('estadistic') || 
-           instTexto.includes('fisic') || 
-           instTexto.includes('ciencias exactas') || 
-           instTexto.includes('sistemas') || 
-           esIngeniero;
-  }
-
-  // 4. Física / Ciencias Naturales
-  const esFisica = compTexto.includes('fisica') || 
-                   compTexto.includes('naturales') || 
-                   compTexto.includes('220201501');
-  if (esFisica) {
-    return instTexto.includes('fisic') || 
-           instTexto.includes('ciencias naturales') || 
-           instTexto.includes('quimic') || 
-           esIngeniero;
-  }
-
-  // 5. Ética / Integralidad / Enrique Low Murtra
-  const esEtica = compTexto.includes('etica') || 
-                  compTexto.includes('low murtra') || 
-                  compTexto.includes('cultura de paz') || 
-                  compTexto.includes('240201526');
-  if (esEtica) {
-    return instTexto.includes('etica') || 
-           instTexto.includes('humanidades') || 
-           instTexto.includes('psicolog') || 
-           instTexto.includes('trabajo social') || 
-           instTexto.includes('filosof') || 
-           instTexto.includes('social');
-  }
-
-  // 6. Comunicación
-  const esComunicacion = compTexto.includes('comunicacion') || 
-                         compTexto.includes('240201524');
-  if (esComunicacion) {
-    return instTexto.includes('comunicac') || 
-           instTexto.includes('periodismo') || 
-           instTexto.includes('lengua') || 
-           instTexto.includes('letras') || 
-           instTexto.includes('humanidades');
-  }
-
-  // 7. Emprendimiento
-  const esEmprendimiento = compTexto.includes('emprendedora') || 
-                           compTexto.includes('emprendimiento') || 
-                           compTexto.includes('negocio') || 
-                           compTexto.includes('240201529');
-  if (esEmprendimiento) {
-    return instTexto.includes('emprendimiento') || 
-           instTexto.includes('administrac') || 
-           instTexto.includes('gestion') || 
-           instTexto.includes('negocios') || 
-           instTexto.includes('econom');
-  }
-
-  // 8. Ambiental / SST
-  const esAmbiental = compTexto.includes('ambiental') || 
-                      compTexto.includes('sst') || 
-                      compTexto.includes('seguridad y salud') || 
-                      compTexto.includes('220601501');
-  if (esAmbiental) {
-    return instTexto.includes('ambiental') || 
-           instTexto.includes('sst') || 
-           instTexto.includes('seguridad y salud') || 
-           instTexto.includes('ecolog') || 
-           instTexto.includes('ocupacional');
-  }
-
-  // Si no coincide con ninguna categoría específica, considerar perfil afín si el tipo coincide
-  if (competencia.tipo === 'Técnica' && (esIngeniero || instTexto.includes('tecnol') || instTexto.includes('sistemas'))) {
+  // Si no coincide con ninguna área específica, considerar perfil afín si el tipo coincide
+  if (competencia.tipo === 'Técnica' && (ctx.esIngeniero || instTexto.includes('tecnol') || instTexto.includes('sistemas'))) {
     return true;
   }
 
