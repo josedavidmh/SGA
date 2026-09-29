@@ -88,10 +88,18 @@ export function useSeguimientoCurricular({
     return registrosHorasEjecutadas.filter(r => !r.fichaNumero || r.fichaNumero === ficha.numero_ficha);
   }, [registrosHorasEjecutadas, ficha]);
 
+  // Seguimiento por RAP SOLO de esta ficha. Antes se pasaba el de todas las
+  // fichas y la columna "Instructor(es) responsables" mostraba, en cada
+  // ficha, a los instructores que Juicios había registrado en OTRAS fichas.
+  const rapsSeguimientoFicha = React.useMemo(() => {
+    if (!ficha) return [];
+    return rapsSeguimiento.filter(s => s.fichaId === ficha.id || s.fichaNumero === ficha.numero_ficha);
+  }, [rapsSeguimiento, ficha]);
+
   // Comparativo Planeado vs Ejecutado por Competencia (semáforo 70%-80% / avanzado / alerta)
   const comparativoLista: ComparativoCompetenciaItem[] = React.useMemo(() => {
-    return calcularComparativoCompetencias(competenciasPrograma, registrosHorasFicha, fichaActividades, rapsSeguimiento);
-  }, [competenciasPrograma, registrosHorasFicha, fichaActividades, rapsSeguimiento]);
+    return calcularComparativoCompetencias(competenciasPrograma, registrosHorasFicha, fichaActividades, rapsSeguimientoFicha);
+  }, [competenciasPrograma, registrosHorasFicha, fichaActividades, rapsSeguimientoFicha]);
 
   // Estadísticas consolidadas del comparativo
   const totalHorasDirectas = comparativoLista.reduce((acc, curr) => acc + curr.horasTrabajoDirecto, 0);
