@@ -63,6 +63,8 @@ import {
   fetchFichasFromSupabase,
   insertFichaInSupabase,
   updateFichaInSupabase,
+  reasignarInstructorEnSupabase,
+  renombrarInstructorEnSupabase,
   deleteFichaFromSupabase,
   fetchInstructoresFromSupabase,
   insertInstructorInSupabase,
@@ -159,6 +161,8 @@ import {
   AUDITORIA_SISTEMA_INICIAL
 } from './mockData';
 import { generarUuid } from './lib/id';
+import { esFichaDelLider, fichasPermitidas, puedeEditarHorarioDeFicha } from './lib/permisos';
+import { homologarInstructores } from './lib/nombresInstructor';
 import { esProvisionalVigente, restaurarAntesDeProvisional, fotoPrevia } from './lib/firmezaSeguimiento';
 
 export default function App() {
@@ -679,6 +683,95 @@ export default function App() {
   React.useEffect(() => { rapsRef.current = raps; }, [raps]);
   React.useEffect(() => { usuariosRef.current = usuarios; }, [usuarios]);
 
+  // HOMOLOGACIÓN DE INSTRUCTORES: une los registros que son la misma persona
+  // (p.ej. "Ing. José David Montesino Hoyos" creado a mano y "JOSE DAVID
+  // MONTESINO HOYOS" detectado en SofiaPlus) y deja todos los nombres en
+  // MAYÚSCULAS, como vienen de SofiaPlus, para que no se vuelva a duplicar.
+  // Lo del duplicado (bloques, seguimiento, fichas que lidera) pasa al que
+  // se conserva, aquí y en Supabase.
+  const homologandoRef = React.useRef(false);
+  React.useEffect(() => {
+    if (isSyncingSupabase || homologandoRef.current) return;
+    const referencias = new Map<string, number>();
+    const sumar = (id?: string) => { if (id) referencias.set(id, (referencias.get(id) || 0) + 1); };
+    horariosRef.current.forEach(h => sumar(h.instructorId));
+    rapsSeguimientoRef.current.forEach(r => sumar(r.instructorId));
+    const res = homologarInstructores(instructores, {
+      correosConCuenta: new Set(usuarios.map(u => u.correo.toLowerCase())),
+      referencias
+    });
+    if (res.actualizados.length === 0 && res.eliminados.length === 0) return;
+    homologandoRef.current = true;
+
+    const nombrePorId = new Map<string, string>();
+    res.instructores.forEach(i => nombrePorId.set(i.id, i.nombreCompleto));
+    const idFinal = (id?: string) => (id && res.reemplazos.get(id)) || id;
+    const ajustar = <T extends { instructorId?: string; instructorNombre?: string }>(x: T): T => {
+      if (!x.instructorId) return x;
+      const id = idFinal(x.instructorId)!;
+      const nombre = nombrePorId.get(id);
+      if (id === x.instructorId && (!nombre || nombre === x.instructorNombre)) return x;
+      return { ...x, instructorId: id, instructorNombre: nombre || x.instructorNombre };
+    };
+    const ajustarFicha = (f: Ficha): Ficha => {
+      if (!f.instructorLiderId) return f;
+      const id = idFinal(f.instructorLiderId)!;
+      const nombre = nombrePorId.get(id);
+      if (id === f.instructorLiderId && (!nombre || nombre === f.instructorLiderNombre)) return f;
+      return { ...f, instructorLiderId: id, instructorLiderNombre: nombre || f.instructorLiderNombre };
+    };
+
+    setInstructores(res.instructores);
+    setHorarios(prev => prev.map(ajustar));
+    setRapsSeguimiento(prev => prev.map(ajustar));
+    setFichas(prev => prev.map(ajustarFicha));
+    setSelectedFicha(prev => (prev ? ajustarFicha(prev) : prev));
+
+    if (res.eliminados.length > 0) {
+      registrarLog(
+        'HOMOLOGACION_INSTRUCTORES',
+        'Gestión de Instructores',
+        res.eliminados.map(d => `"${d.nombreCompleto}" unificado con "${nombrePorId.get(res.reemplazos.get(d.id)!)}"`).join(' | ')
+      );
+    }
+
+    (async () => {
+      try {
+        // 1) El registro que se conserva, con su nombre en mayúsculas (y
+        //    creado en Supabase si solo existía en este navegador).
+        for (const inst of res.actualizados) {
+          const r = await updateInstructorInSupabase(inst.id, {
+            nombres: inst.nombres,
+            apellidos: inst.apellidos,
+            ...(inst.documento ? { documento: inst.documento } : {}),
+            ...(inst.telefono ? { telefono: inst.telefono } : {})
+          });
+          if (r.success && Array.isArray(r.data) && r.data.length === 0) {
+            const ins = await insertInstructorInSupabase(inst);
+            if (!ins.success) console.error(`Homologación: no se pudo crear en Supabase a ${inst.nombreCompleto}:`, ins.error);
+          } else if (!r.success) {
+            console.error(`Homologación: no se pudo actualizar en Supabase a ${inst.nombreCompleto}:`, r.error);
+          }
+          await renombrarInstructorEnSupabase(inst.id, inst.nombreCompleto);
+        }
+        // 2) Lo del duplicado pasa al conservado y luego se borra el duplicado.
+        for (const dup of res.eliminados) {
+          const idCons = res.reemplazos.get(dup.id)!;
+          const r = await reasignarInstructorEnSupabase(dup.id, idCons, nombrePorId.get(idCons) || '');
+          if (!r.success) {
+            console.error(`Homologación: no se pudo reasignar ${dup.nombreCompleto}:`, r.error);
+            continue; // no se borra si no se pudo mover lo que tenía
+          }
+          const d = await deleteInstructorFromSupabase(dup.id);
+          if (!d.success) console.error(`Homologación: no se pudo eliminar el duplicado ${dup.nombreCompleto}:`, d.error);
+        }
+      } finally {
+        homologandoRef.current = false;
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instructores, usuarios, isSyncingSupabase]);
+
   // Las escrituras del catálogo se encadenan (una termina antes de que
   // empiece la siguiente): cada una borra y reinserta por programa, y dos
   // ejecuciones intercaladas podían duplicar o perder filas.
@@ -1179,8 +1272,8 @@ export default function App() {
       setUsuarios(prev => prev.map(u => u.id === user.id ? { ...u, clave: claveIngresada } : u));
     }
     if (user.rol === 'INSTRUCTOR_LIDER') {
-      const fichaLider = fichas.find(f => f.id === user.fichaAsignadaId || f.instructorLiderId === user.id || f.instructorLiderEmail === user.correo) || fichas[0] || null;
-      if (fichaLider) setSelectedFicha(fichaLider);
+      const fichaLider = fichasPermitidas(fichas, user, instructores)[0] || null;
+      setSelectedFicha(fichaLider);
     }
     setActiveTab('dashboard');
     registrarLog('INICIO_SESION_EXITOSO', 'Autenticación y Seguridad', `Inicio de sesión exitoso: ${user.nombre_completo} (${user.rol}) - ${user.correo}`);
@@ -1206,8 +1299,8 @@ export default function App() {
           setActiveTab('dashboard');
         }
       } else if (rol === 'INSTRUCTOR_LIDER') {
-        const fichaLider = fichas.find(f => f.id === user.fichaAsignadaId || f.instructorLiderId === user.id) || fichas[0] || null;
-        if (fichaLider) setSelectedFicha(fichaLider);
+        const fichaLider = fichasPermitidas(fichas, user, instructores)[0] || null;
+        setSelectedFicha(fichaLider);
         if (activeTab === 'admin' || activeTab === 'cierres' || activeTab === 'instructores') {
           setActiveTab('dashboard');
         }
@@ -1487,6 +1580,86 @@ export default function App() {
 
       alert(`¡Instructor ${instructorActualizado.nombreCompleto} registrado con éxito!${crearCuentaUsuario ? `\nUsuario de acceso creado: ${instructorActualizado.email}\nClave: ${claveUsuario || 'Sistema2026*'}` : ''}`);
     }
+  };
+
+  // Crear la cuenta de usuario de un instructor que todavía no tiene y
+  // dejarlo como INSTRUCTOR LÍDER de las fichas elegidas. El vínculo con las
+  // fichas se guarda en la ficha (instructor_lider_id), que es lo que viaja a
+  // Supabase y lo reconoce desde cualquier equipo.
+  const handleCrearCuentaLider = async (
+    instructor: Instructor,
+    datos: { correo: string; clave: string; fichaIds: string[] }
+  ): Promise<{ exito: boolean; mensaje: string }> => {
+    const correo = datos.correo.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+      return { exito: false, mensaje: 'Escribe un correo válido para la cuenta.' };
+    }
+    if ((datos.clave || '').length < 6) {
+      return { exito: false, mensaje: 'La clave debe tener al menos 6 caracteres.' };
+    }
+    const yaExiste = usuarios.find(u => u.correo.toLowerCase() === correo);
+    if (yaExiste) {
+      return { exito: false, mensaje: `Ya existe una cuenta con el correo ${correo} (${yaExiste.nombre_completo}).` };
+    }
+
+    const nuevoUser: User = {
+      id: `usr_${instructor.id}`,
+      correo,
+      clave: datos.clave,
+      nombre_completo: instructor.nombreCompleto,
+      rol: 'INSTRUCTOR_LIDER',
+      cargo: `Instructor Líder - ${instructor.especialidad || 'Formación Profesional'}`,
+      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(instructor.nombreCompleto)}&background=0D631B&color=fff`,
+      fichaAsignadaId: datos.fichaIds[0]
+    };
+
+    const resUsuario = await upsertUsuarioInSupabase(nuevoUser);
+    if (!resUsuario.success) {
+      return { exito: false, mensaje: `No se pudo crear la cuenta en Supabase:\n\n${resUsuario.error}` };
+    }
+    setUsuarios(prev => [...prev, nuevoUser]);
+
+    // Si el correo de la cuenta es distinto al que tenía el instructor, se
+    // actualiza también en la planta (así el sistema lo enlaza con sus fichas).
+    const instructorFinal = correo !== (instructor.email || '').toLowerCase() ? { ...instructor, email: correo } : instructor;
+    if (instructorFinal !== instructor) {
+      setInstructores(prev => prev.map(i => i.id === instructor.id ? instructorFinal : i));
+      const r = await updateInstructorInSupabase(instructor.id, { email: correo });
+      if (!r.success) console.error('No se pudo actualizar el correo del instructor en Supabase:', r.error);
+    }
+
+    // Fichas que va a liderar
+    const erroresFichas: string[] = [];
+    for (const fichaId of datos.fichaIds) {
+      const cambios = {
+        instructorLiderId: instructorFinal.id,
+        instructorLiderNombre: instructorFinal.nombreCompleto,
+        instructorLiderEmail: correo
+      };
+      setFichas(prev => prev.map(f => f.id === fichaId ? { ...f, ...cambios } : f));
+      setSelectedFicha(prev => prev && prev.id === fichaId ? { ...prev, ...cambios } : prev);
+      const r = await updateFichaInSupabase(fichaId, { instructorLiderId: instructorFinal.id });
+      if (!r.success) {
+        const num = fichas.find(f => f.id === fichaId)?.numero_ficha || fichaId;
+        erroresFichas.push(`Ficha ${num}: ${r.error}`);
+      }
+    }
+
+    const numeros = datos.fichaIds.map(id => fichas.find(f => f.id === id)?.numero_ficha).filter(Boolean).join(', ');
+    registrarLog(
+      'CUENTA_LIDER_CREADA',
+      'Gestión de Instructores',
+      `Cuenta de Instructor Líder creada para ${instructorFinal.nombreCompleto} (${correo})${numeros ? ` — fichas: ${numeros}` : ''}.`
+    );
+
+    return {
+      exito: true,
+      mensaje:
+        `${instructorFinal.nombreCompleto} ya puede entrar como Instructor Líder.\n\n` +
+        `Usuario: ${correo}\nClave: ${datos.clave}` +
+        (numeros ? `\nFichas a su cargo: ${numeros}` : '\nTodavía no tiene fichas a su cargo: asígnaselas cuando estén creadas, eligiéndolo como instructor líder de la ficha.') +
+        (erroresFichas.length > 0 ? `\n\n⚠ No se pudo guardar en Supabase:\n${erroresFichas.join('\n')}` : '')
+    };
   };
 
   const handleToggleEstadoInstructor = (id: string) => {
@@ -1942,6 +2115,9 @@ export default function App() {
     if (!selectedFicha) {
       return { exito: false, mensaje: 'Selecciona una ficha antes de cargar el Reporte de Instructores por Ficha.' };
     }
+    if (currentUser.rol === 'INSTRUCTOR_LIDER' && !esFichaDelLider(selectedFicha, currentUser, instructores)) {
+      return { exito: false, mensaje: `La ficha ${selectedFicha.numero_ficha} no está a tu cargo como instructor líder. Solo puedes cargar archivos de tus fichas.` };
+    }
 
     const fichasEnArchivo = Array.from(new Set(nuevosRegistros.map(r => r.fichaNumero).filter((f): f is string => !!f)));
     if (fichasEnArchivo.length === 0) {
@@ -2075,6 +2251,9 @@ export default function App() {
     const ficha = fichaObjetivo || selectedFicha;
     if (!ficha) {
       return { exito: false, mensaje: 'Selecciona una ficha antes de cargar el reporte de Juicios Evaluativos.' };
+    }
+    if (currentUser.rol === 'INSTRUCTOR_LIDER' && !esFichaDelLider(ficha, currentUser, instructores)) {
+      return { exito: false, mensaje: `La ficha ${ficha.numero_ficha} no está a tu cargo como instructor líder. Solo puedes cargar archivos de tus fichas.` };
     }
     if (reporte.fichaNumero !== ficha.numero_ficha) {
       return {
@@ -3003,16 +3182,18 @@ export default function App() {
   };
 
   // Filtrado RBAC para Instructor Líder: solo ve y gestiona sus fichas asignadas
-  const fichasVisibles = React.useMemo(() => {
-    if (currentUser.rol === 'INSTRUCTOR_LIDER') {
-      return fichas.filter(f => 
-        f.instructorLiderId === currentUser.id ||
-        f.id === currentUser.fichaAsignadaId ||
-        (f.instructorLiderEmail && f.instructorLiderEmail.toLowerCase() === currentUser.correo.toLowerCase())
-      );
-    }
-    return fichas;
-  }, [fichas, currentUser]);
+  const fichasVisibles = React.useMemo(
+    () => fichasPermitidas(fichas, currentUser, instructores),
+    [fichas, currentUser, instructores]
+  );
+
+  // El líder nunca debe quedar parado sobre una ficha que no es suya
+  // (p.ej. la última que quedó seleccionada en este navegador).
+  React.useEffect(() => {
+    if (currentUser.rol !== 'INSTRUCTOR_LIDER') return;
+    if (selectedFicha && fichasVisibles.some(f => f.id === selectedFicha.id)) return;
+    setSelectedFicha(fichasVisibles[0] || null);
+  }, [currentUser, fichasVisibles, selectedFicha]);
 
   if (!isAuthenticated) {
     return (
@@ -3131,6 +3312,7 @@ export default function App() {
               onNavigateToReportesInstructores={() => setActiveTab('reportes')}
               registrosHorasEjecutadas={registrosHorasEjecutadas}
               actividades={actividades}
+              puedeEditar={puedeEditarHorarioDeFicha(selectedFicha, currentUser, instructores)}
             />
           )}
 
@@ -3217,6 +3399,9 @@ export default function App() {
               onEliminarInstructor={handleEliminarInstructor}
               onSincronizarSupabase={sincronizarDatosDesdeSupabase}
               isSyncing={isSyncingSupabase}
+              usuarios={usuarios}
+              todasLasFichas={fichas}
+              onCrearCuentaLider={handleCrearCuentaLider}
             />
           )}
 
@@ -3236,8 +3421,9 @@ export default function App() {
               onActualizarCompetenciasYRaps={handleActualizarCompetenciasYRaps}
               onGuardarHorasEjecutadas={handleGuardarHorasEjecutadas}
               onGuardarJuiciosEvaluativos={handleGuardarJuiciosEvaluativos}
-              onLimpiarEstructura={handleLimpiarEstructura}
+              onLimpiarEstructura={currentUser.rol === 'INSTRUCTOR_LIDER' ? undefined : handleLimpiarEstructura}
               onLimpiarCola={handleLimpiarCola}
+              soloArchivosDeFicha={currentUser.rol === 'INSTRUCTOR_LIDER'}
               onNavigateToCompetencias={(progCodigo) => {
                 if (progCodigo) setSelectedProgramaForCompetencias(progCodigo);
                 setActiveTab('competencias');
@@ -3315,6 +3501,7 @@ export default function App() {
         instructorParaEditar={instructorParaEditar}
         especialidadesDisponibles={especialidades}
         onGuardarInstructor={handleGuardarInstructor}
+        instructoresExistentes={instructores}
       />
 
       {/* Modal de Edición y Creación de Programas de Formación */}

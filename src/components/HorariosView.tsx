@@ -73,6 +73,8 @@ interface HorariosProps {
   /** Horas por competencia cargadas desde SofiaPlus (para avisar si una competencia ya pasó del 100%). */
   registrosHorasEjecutadas?: RegistroHorasEjecutadas[];
   actividades?: ActividadSeguimiento[];
+  /** Permiso de edición calculado en App (el instructor líder solo en sus fichas). */
+  puedeEditar?: boolean;
   onNavigateToCompetencias?: (programaCodigo?: string) => void;
   onSelectFicha?: (ficha: Ficha) => void;
   onNavigateToReportesInstructores?: () => void;
@@ -160,6 +162,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   onAsignarInstructorABloque,
   registrosHorasEjecutadas = [],
   actividades = [],
+  puedeEditar,
   onNavigateToCompetencias,
   onSelectFicha,
   onNavigateToReportesInstructores
@@ -440,7 +443,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   };
 
   // Permiso de edición
-  const canEditHorarios = currentUser.rol === 'COORDINADOR' || currentUser.rol === 'ADMINISTRADOR' || currentUser.rol === 'AUXILIAR';
+  const canEditHorarios = puedeEditar ?? (currentUser.rol === 'COORDINADOR' || currentUser.rol === 'ADMINISTRADOR' || currentUser.rol === 'AUXILIAR');
 
   // Buscar si la celda actual tiene bloque asignado para esta ficha
   // Solo los bloques del trimestre que se está viendo/editando: cada

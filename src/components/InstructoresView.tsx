@@ -19,8 +19,11 @@ import {
   Trash2,
   ShieldAlert,
   X,
-  Info
+  Info,
+  KeyRound,
+  ShieldCheck
 } from 'lucide-react';
+import { dialogo } from './DialogoSistema';
 import { 
   Instructor, 
   User, 
@@ -43,6 +46,14 @@ interface InstructoresViewProps {
   onEliminarInstructor?: (id: string) => void;
   onSincronizarSupabase?: () => void;
   isSyncing?: boolean;
+  /** Cuentas de usuario existentes (para saber quién ya tiene cuenta). */
+  usuarios?: User[];
+  /** Todas las fichas (para elegir cuáles liderará). */
+  todasLasFichas?: Ficha[];
+  onCrearCuentaLider?: (
+    instructor: Instructor,
+    datos: { correo: string; clave: string; fichaIds: string[] }
+  ) => Promise<{ exito: boolean; mensaje: string }>;
 }
 
 export const InstructoresView: React.FC<InstructoresViewProps> = ({
@@ -57,8 +68,55 @@ export const InstructoresView: React.FC<InstructoresViewProps> = ({
   onToggleEstado,
   onEliminarInstructor,
   onSincronizarSupabase,
-  isSyncing = false
+  isSyncing = false,
+  usuarios = [],
+  todasLasFichas,
+  onCrearCuentaLider
 }) => {
+  const fichasParaLiderar = todasLasFichas || fichas;
+  const cuentaDe = (inst: Instructor) => {
+    const correo = (inst.email || '').trim().toLowerCase();
+    return usuarios.find(u =>
+      u.id === `usr_${inst.id}` || (!!correo && u.correo.toLowerCase() === correo)
+    );
+  };
+  const ROL_TEXTO: Record<string, string> = {
+    ADMINISTRADOR: 'Administrador',
+    COORDINADOR: 'Coordinador',
+    INSTRUCTOR_LIDER: 'Instructor Líder',
+    AUXILIAR: 'Auxiliar'
+  };
+
+  // Modal "Crear cuenta como Instructor Líder"
+  const [modalLider, setModalLider] = React.useState<Instructor | null>(null);
+  const [liderCorreo, setLiderCorreo] = React.useState('');
+  const [liderClave, setLiderClave] = React.useState('');
+  const [liderFichas, setLiderFichas] = React.useState<string[]>([]);
+  const [liderError, setLiderError] = React.useState<string | null>(null);
+  const [liderGuardando, setLiderGuardando] = React.useState(false);
+
+  const abrirModalLider = (inst: Instructor) => {
+    setModalLider(inst);
+    setLiderCorreo((inst.email || '').toLowerCase());
+    setLiderClave('Sena' + Math.floor(1000 + Math.random() * 9000) + '*');
+    setLiderFichas(fichasParaLiderar.filter(f => f.instructorLiderId === inst.id).map(f => f.id));
+    setLiderError(null);
+    setLiderGuardando(false);
+  };
+
+  const confirmarCuentaLider = async () => {
+    if (!modalLider || !onCrearCuentaLider) return;
+    setLiderGuardando(true);
+    setLiderError(null);
+    const res = await onCrearCuentaLider(modalLider, { correo: liderCorreo, clave: liderClave, fichaIds: liderFichas });
+    setLiderGuardando(false);
+    if (!res.exito) {
+      setLiderError(res.mensaje);
+      return;
+    }
+    setModalLider(null);
+    await dialogo.alerta({ tipo: 'exito', titulo: 'Cuenta de Instructor Líder creada', mensaje: res.mensaje, textoAceptar: 'Listo' });
+  };
   const [searchTerm, setSearchTerm] = React.useState('');
   const [filterEspecialidad, setFilterEspecialidad] = React.useState('TODAS');
 
@@ -386,6 +444,35 @@ export const InstructoresView: React.FC<InstructoresViewProps> = ({
                       <span>{inst.telefono || 'Sin teléfono registrado'} • C.C. {inst.documento}</span>
                     </div>
                   </div>
+
+                  {/* Cuenta de acceso */}
+                  {(() => {
+                    const cuenta = cuentaDe(inst);
+                    if (cuenta) {
+                      return (
+                        <div className="mt-3 flex items-center gap-1.5 text-[11px] font-bold text-[#0D631B] bg-emerald-50 border border-emerald-200 rounded-xl px-2.5 py-1.5">
+                          <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">Con cuenta · {ROL_TEXTO[cuenta.rol] || cuenta.rol}</span>
+                        </div>
+                      );
+                    }
+                    if (!canCreate || !onCrearCuentaLider) {
+                      return (
+                        <div className="mt-3 text-[11px] text-slate-400">Sin cuenta de usuario</div>
+                      );
+                    }
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => abrirModalLider(inst)}
+                        className="mt-3 w-full flex items-center justify-center gap-1.5 text-[11px] font-bold text-[#0D631B] bg-white hover:bg-emerald-50 border border-dashed border-emerald-400 rounded-xl px-2.5 py-1.5 transition-colors"
+                        title="Crear usuario de acceso y dejarlo como Instructor Líder"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                        <span>Crear cuenta como Instructor Líder</span>
+                      </button>
+                    );
+                  })()}
                 </div>
 
                 {/* Barra de Carga Horaria */}
@@ -411,6 +498,110 @@ export const InstructoresView: React.FC<InstructoresViewProps> = ({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* MODAL: CREAR CUENTA COMO INSTRUCTOR LÍDER */}
+      {modalLider && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="h-1.5 bg-gradient-to-r from-emerald-400 to-[#0D631B]" />
+            <div className="p-6 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-[#0D631B] flex items-center justify-center shrink-0">
+                    <KeyRound className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-[#111C2D]">Crear cuenta como Instructor Líder</h3>
+                    <p className="text-[11px] text-slate-500">{modalLider.nombreCompleto}</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setModalLider(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <label className="block space-y-1">
+                <span className="text-[11px] font-bold text-slate-600">Correo (usuario de acceso)</span>
+                <input
+                  type="email"
+                  value={liderCorreo}
+                  onChange={(e) => setLiderCorreo(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-[#0D631B] focus:bg-white"
+                  placeholder="nombre.apellido@sena.edu.co"
+                />
+                <span className="block text-[10px] text-slate-400">Si lo cambias, también se actualiza en el directorio de instructores.</span>
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-[11px] font-bold text-slate-600">Clave inicial</span>
+                <input
+                  type="text"
+                  value={liderClave}
+                  onChange={(e) => setLiderClave(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:outline-none focus:border-[#0D631B] focus:bg-white"
+                />
+                <span className="block text-[10px] text-slate-400">Compártela con el instructor. En Supabase solo se guarda cifrada.</span>
+              </label>
+
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold text-slate-600">Fichas que liderará <span className="font-normal text-slate-400">(opcional)</span></span>
+                <div className="max-h-44 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+                  {fichasParaLiderar.length === 0 ? (
+                    <div className="p-3 text-[11px] text-slate-400">Todavía no hay fichas creadas. Puedes crear la cuenta ahora y asignarle la ficha después.</div>
+                  ) : fichasParaLiderar.map(f => {
+                    const marcada = liderFichas.includes(f.id);
+                    const liderActual = f.instructorLiderId && f.instructorLiderId !== modalLider.id
+                      ? (instructores.find(i => i.id === f.instructorLiderId)?.nombreCompleto || f.instructorLiderNombre || 'otro instructor')
+                      : null;
+                    return (
+                      <label key={f.id} className="flex items-start gap-2 p-2.5 text-xs cursor-pointer hover:bg-slate-50">
+                        <input
+                          type="checkbox"
+                          checked={marcada}
+                          onChange={() => setLiderFichas(prev => marcada ? prev.filter(id => id !== f.id) : [...prev, f.id])}
+                          className="mt-0.5 accent-[#0D631B]"
+                        />
+                        <span className="min-w-0">
+                          <span className="font-bold text-[#111C2D]">{f.numero_ficha}</span>
+                          <span className="text-slate-500"> · {f.programaNombre}</span>
+                          {liderActual && (
+                            <span className="block text-[10px] text-amber-700">
+                              Líder actual: {liderActual}{marcada ? ' — será reemplazado' : ''}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <span className="block text-[10px] text-slate-400">Puedes dejarlo sin ficha y asignársela después, eligiéndolo como instructor líder al crear o editar la ficha. Solo podrá editar el horario y cargar Juicios y Horas de las fichas que lidere.</span>
+              </div>
+
+              {liderError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-[11px] text-rose-800 whitespace-pre-line">{liderError}</div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setModalLider(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={liderGuardando}
+                  onClick={confirmarCuentaLider}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-[#0D631B] hover:bg-[#0a4d15] disabled:opacity-60"
+                >
+                  {liderGuardando ? 'Creando…' : 'Crear cuenta'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

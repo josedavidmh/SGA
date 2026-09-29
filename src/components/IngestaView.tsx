@@ -72,6 +72,8 @@ interface IngestaProps {
   onNavigateToCompetencias?: (programaCodigo?: string) => void;
   onNavigateToSeguimiento?: () => void;
   onNavigateToFichas?: (fichaNumero?: string) => void;
+  /** Instructor líder: solo Juicios Evaluativos y Horas (Reporte de Instructores por Ficha) de sus fichas. */
+  soloArchivosDeFicha?: boolean;
 }
 
 export const IngestaView: React.FC<IngestaProps> = ({
@@ -93,7 +95,8 @@ export const IngestaView: React.FC<IngestaProps> = ({
   onLimpiarCola,
   onNavigateToCompetencias,
   onNavigateToSeguimiento,
-  onNavigateToFichas: _onNavigateToFichas
+  onNavigateToFichas: _onNavigateToFichas,
+  soloArchivosDeFicha = false
 }) => {
   const [_selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [isProcessing, setIsProcessing] = React.useState(false);
@@ -462,7 +465,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
 
         {/* Acciones Superiores */}
         <div className="flex items-center space-x-2 flex-wrap gap-2">
-          {programas.length > 1 && (
+          {programas.length > 1 && !soloArchivosDeFicha && (
             <div className="flex items-center space-x-1.5 bg-white border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-700 shadow-2xs">
               <span className="text-slate-400 font-normal">Programa:</span>
               <select
@@ -508,8 +511,22 @@ export const IngestaView: React.FC<IngestaProps> = ({
           <span className="text-[11px] text-slate-400 font-medium">Cargas directas y especializadas</span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {soloArchivosDeFicha && (
+          <div className="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-900 flex items-start gap-2">
+            <ShieldCheck className="w-4 h-4 text-[#0D631B] shrink-0 mt-0.5" />
+            <span>
+              Como <strong>instructor líder</strong> puedes cargar los <strong>Juicios Evaluativos</strong> y el
+              {' '}<strong>Reporte de Instructores por Ficha</strong> (horas) únicamente de tus fichas
+              {fichas.length > 0 ? <> (<strong>{fichas.map(f => f.numero_ficha).join(', ')}</strong>)</> : null}.
+              {' '}El archivo debe corresponder a la ficha seleccionada
+              {ficha ? <> — ahora: <strong>{ficha.numero_ficha}</strong></> : ' (selecciona una arriba)'}.
+            </span>
+          </div>
+        )}
+
+        <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${soloArchivosDeFicha ? '' : 'lg:grid-cols-4'}`}>
           {/* Card 1: Archivo de Seguimiento */}
+          {!soloArchivosDeFicha && (
           <div className="p-4 rounded-2xl bg-white border border-[#B3E5FE] shadow-2xs hover:border-[#005A8C] transition-all space-y-2 flex flex-col justify-between">
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -560,6 +577,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
               </label>
             </div>
           </div>
+          )}
 
           {/* Card 2: Juicios Evaluativos SofiaPlus */}
           <div className="p-4 rounded-2xl bg-white border border-[#D3BBFF] shadow-2xs hover:border-[#6F43C0] transition-all space-y-2 flex flex-col justify-between">
@@ -581,6 +599,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
 
             <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1 flex-wrap text-[10px]">
               <div className="flex items-center space-x-1">
+                {!soloArchivosDeFicha && (
                 <button
                   type="button"
                   onClick={handleCargarDemoJuicios}
@@ -590,6 +609,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
                   <Sparkles className="w-3 h-3 text-[#6F43C0]" />
                   <span>Demo</span>
                 </button>
+                )}
 
                 <button
                   type="button"
@@ -668,6 +688,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
           </div>
 
           {/* Card 4: Seguimiento Curricular */}
+          {!soloArchivosDeFicha && (
           <div className="p-4 rounded-2xl bg-white border border-[#C8E6C9] shadow-2xs hover:border-[#2E7D32] transition-all space-y-2 flex flex-col justify-between">
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -703,6 +724,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
               </label>
             </div>
           </div>
+          )}
         </div>
       </div>
 

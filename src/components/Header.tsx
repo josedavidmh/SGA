@@ -59,9 +59,8 @@ export const Header: React.FC<HeaderProps> = ({
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
 
   // Si es instructor líder, solo puede ver su ficha asignada; Auxiliar, Coordinador y Admin ven todas
-  const availableFichas = currentUser.rol === 'INSTRUCTOR_LIDER' && currentUser.fichaAsignadaId
-    ? fichas.filter(f => f.id === currentUser.fichaAsignadaId)
-    : fichas;
+  // (la lista que llega ya viene filtrada por permisos desde App)
+  const availableFichas = fichas;
 
   const canCreateFicha = currentUser.rol === 'COORDINADOR' || currentUser.rol === 'ADMINISTRADOR' || currentUser.rol === 'AUXILIAR';
 

@@ -71,7 +71,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const canAccessAvanceFichas = true;
   const canAccessHorarios = true;
   const canAccessSeguimiento = true;
-  const canAccessIngesta = currentUser.rol === 'AUXILIAR' || currentUser.rol === 'COORDINADOR' || currentUser.rol === 'ADMINISTRADOR';
+  // El instructor líder entra a Ingesta solo para Juicios y Horas de SUS fichas.
+  const canAccessIngesta = currentUser.rol === 'AUXILIAR' || currentUser.rol === 'COORDINADOR' || currentUser.rol === 'ADMINISTRADOR' || currentUser.rol === 'INSTRUCTOR_LIDER';
   const canAccessCierres = currentUser.rol === 'COORDINADOR' || currentUser.rol === 'ADMINISTRADOR';
   const canAccessInstructores = currentUser.rol === 'COORDINADOR' || currentUser.rol === 'ADMINISTRADOR';
   const canAccessParametrizaciones = currentUser.rol === 'COORDINADOR' || currentUser.rol === 'ADMINISTRADOR';

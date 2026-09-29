@@ -1,5 +1,6 @@
 import { Instructor, Competencia, ResultadoAprendizaje, ReporteJuiciosFicha, RegistroHorasEjecutadas, HistorialEvaluacionInstructor } from '../types';
 import { generarUuid } from '../lib/id';
+import { claveNombrePersona, normalizarNombresInstructor } from '../lib/nombresInstructor';
 
 export type NivelAfinidad = 
   | 'ALTA_HISTORIAL_RAP' 
@@ -293,7 +294,8 @@ export function caracterizarInstructoresDesdeJuicios(
       }
 
       if (!nombre) return;
-      const key = normalizarNombrePersona(nombre);
+      // Sin títulos ni tildes: "Ing. José David…" = "JOSE DAVID…"
+      const key = claveNombrePersona(nombre);
       if (!key) return;
 
       if (!mapaInstructores.has(key)) {
@@ -357,7 +359,7 @@ export function caracterizarInstructoresDesdeJuicios(
     // mismo instructor" un nombre normalizado IDÉNTICO; un parecido fuerte
     // pero no idéntico se trata como un posible homónimo por mal registro
     // manual y se reporta como advertencia, sin fusionarlo ni bloquearlo.
-    const indexExistente = resultado.findIndex(inst => normalizarNombrePersona(inst.nombreCompleto) === key);
+    const indexExistente = resultado.findIndex(inst => claveNombrePersona(inst.nombreCompleto || `${inst.nombres} ${inst.apellidos}`) === key);
 
     const listaHistorial = Array.from(data.evaluaciones.values());
     const compArray = Array.from(data.competenciasSet);
@@ -429,7 +431,7 @@ export function caracterizarInstructoresDesdeJuicios(
       const apellidos = nombresParts.slice(Math.ceil(nombresParts.length / 2)).join(' ') || '';
 
       const colorIndex = resultado.length % COLORES_AVATAR.length;
-      const nuevoInstructor: Instructor = {
+      const nuevoInstructor: Instructor = normalizarNombresInstructor({
         // UUID real: instructores.id es UUID en Supabase. NOTA: este
         // instructor auto-detectado desde Juicios NO se sincroniza a
         // Supabase todavía en ningún punto del código (queda solo en
@@ -455,7 +457,7 @@ export function caracterizarInstructoresDesdeJuicios(
         rapsExperiencia: rapsArray,
         totalJuiciosEvaluados: data.totalJuicios,
         historialEvaluaciones: listaHistorial
-      };
+      });
 
       resultado.push(nuevoInstructor);
     }
@@ -678,7 +680,7 @@ export function crearOEnriquecerInstructoresDesdeHoras(
       while (correosUsados.has(email)) { email = `${base}${n}@correo.edu.co`; n += 1; }
       correosUsados.add(email);
       const { perfilTecnico, especialidad } = inferirEspecialidadPorCompetencia(reg.competenciaDenominacion || '');
-      const inst: Instructor = {
+      const inst: Instructor = normalizarNombresInstructor({
         id: generarUuid(),
         documento: '',
         nombres,
@@ -693,7 +695,7 @@ export function crearOEnriquecerInstructoresDesdeHoras(
         maxHorasSemanales: 40,
         estado: (reg.instructorEstado || '').toLowerCase().startsWith('inactiv') ? 'INACTIVO' : 'ACTIVO',
         competenciasExperiencia: []
-      };
+      });
       resultado.push(inst);
       nuevos.push(inst);
       idx = resultado.length - 1;

@@ -358,6 +358,47 @@ export async function updateInstructorInSupabase(id: string, inst: Partial<Instr
   }
 }
 
+/**
+ * Homologación de instructores duplicados: todo lo que apuntaba al registro
+ * duplicado (bloques de horario, seguimiento por RAP y fichas donde es líder)
+ * pasa al registro que se conserva. Debe llamarse ANTES de borrar el
+ * duplicado (borrarlo elimina sus bloques).
+ */
+export async function reasignarInstructorEnSupabase(idDuplicado: string, idConservado: string, nombreConservado: string): Promise<SyncResult<any>> {
+  if (!isSupabaseConfigured) return { success: false, error: 'Supabase no configurado' };
+  try {
+    const errores: string[] = [];
+    const r1 = await supabase.from('bloques_horarios')
+      .update({ instructor_id: idConservado, instructor_nombre: nombreConservado })
+      .eq('instructor_id', idDuplicado);
+    if (r1.error) errores.push(`bloques_horarios: ${r1.error.message}`);
+    const r2 = await supabase.from('raps_seguimiento')
+      .update({ instructor_id: idConservado, instructor_nombre: nombreConservado })
+      .eq('instructor_id', idDuplicado);
+    if (r2.error) errores.push(`raps_seguimiento: ${r2.error.message}`);
+    const r3 = await supabase.from('fichas')
+      .update({ instructor_lider_id: idConservado })
+      .eq('instructor_lider_id', idDuplicado);
+    if (r3.error) errores.push(`fichas: ${r3.error.message}`);
+    return errores.length > 0 ? { success: false, error: errores.join(' | ') } : { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+/** Actualiza el nombre del instructor guardado como texto en horarios y seguimiento. */
+export async function renombrarInstructorEnSupabase(idInstructor: string, nombre: string): Promise<SyncResult<any>> {
+  if (!isSupabaseConfigured) return { success: false, error: 'Supabase no configurado' };
+  try {
+    const r1 = await supabase.from('bloques_horarios').update({ instructor_nombre: nombre }).eq('instructor_id', idInstructor);
+    const r2 = await supabase.from('raps_seguimiento').update({ instructor_nombre: nombre }).eq('instructor_id', idInstructor);
+    const err = r1.error?.message || r2.error?.message;
+    return err ? { success: false, error: err } : { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 export async function deleteInstructorFromSupabase(id: string): Promise<SyncResult<any>> {
   if (!isSupabaseConfigured) {
     return { success: false, error: 'Supabase no configurado' };

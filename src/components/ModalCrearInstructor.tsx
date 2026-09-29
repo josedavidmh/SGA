@@ -19,6 +19,7 @@ import { Instructor, EspecialidadTematica } from '../types';
 import { generarUuid } from '../lib/id';
 import { insertInstructorInSupabase, updateInstructorInSupabase } from '../services/supabaseService';
 import { isSupabaseConfigured } from '../lib/supabaseClient';
+import { claveNombrePersona, nombreEnMayusculas } from '../lib/nombresInstructor';
 
 interface ModalCrearInstructorProps {
   isOpen: boolean;
@@ -26,6 +27,8 @@ interface ModalCrearInstructorProps {
   instructorParaEditar?: Instructor | null;
   especialidadesDisponibles?: EspecialidadTematica[];
   onGuardarInstructor: (instructor: Instructor, crearCuentaUsuario?: boolean, claveUsuario?: string) => void;
+  /** Planta actual, para no registrar dos veces a la misma persona. */
+  instructoresExistentes?: Instructor[];
 }
 
 const AVATAR_COLORS = [
@@ -57,7 +60,8 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
   onClose,
   instructorParaEditar = null,
   especialidadesDisponibles = [],
-  onGuardarInstructor
+  onGuardarInstructor,
+  instructoresExistentes = []
 }) => {
   const isEditing = !!instructorParaEditar;
 
@@ -125,6 +129,17 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
       return;
     }
 
+    // Misma persona = mismo nombre sin importar tildes, mayúsculas ni "Ing."
+    const clave = claveNombrePersona(`${nombres} ${apellidos}`);
+    const repetido = instructoresExistentes.find(i =>
+      i.id !== instructorParaEditar?.id &&
+      claveNombrePersona(i.nombreCompleto || `${i.nombres} ${i.apellidos}`) === clave
+    );
+    if (repetido) {
+      alert(`Ya existe un instructor con ese nombre: ${repetido.nombreCompleto}.\nEdítalo en lugar de crear uno nuevo.`);
+      return;
+    }
+
     const emailOficial = email.trim() || `${nombres.toLowerCase().split(' ')[0]}.${apellidos.toLowerCase().split(' ')[0]}@correo.edu.co`;
 
     const instructorPayload: Instructor = {
@@ -133,9 +148,10 @@ export const ModalCrearInstructor: React.FC<ModalCrearInstructorProps> = ({
       // esperar a una resincronización.
       id: instructorParaEditar ? instructorParaEditar.id : generarUuid(),
       documento: documento.trim(),
-      nombres: nombres.trim(),
-      apellidos: apellidos.trim(),
-      nombreCompleto: `Ing. ${nombres.trim()} ${apellidos.trim()}`,
+      // Nombres en MAYÚSCULAS y sin "Ing.", igual que en SofiaPlus.
+      nombres: nombreEnMayusculas(nombres),
+      apellidos: nombreEnMayusculas(apellidos),
+      nombreCompleto: `${nombreEnMayusculas(nombres)} ${nombreEnMayusculas(apellidos)}`,
       email: emailOficial,
       telefono: telefono.trim(),
       perfilTecnico: perfilTecnico.trim() || 'Instructor de Formación Profesional Integral',
