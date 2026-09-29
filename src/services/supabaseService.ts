@@ -37,7 +37,7 @@ export async function fetchFichasFromSupabase(): Promise<Ficha[]> {
       programaNombre: row.programa_nombre || 'ADSO: Análisis y Desarrollo de Software',
       version: row.version || '1',
       nivelFormacion: (row.nivel_formacion as any) || 'Tecnólogo',
-      instructorLiderId: row.instructor_lider_id || 'inst_01',
+      instructorLiderId: row.instructor_lider_id || '',
       instructorLiderNombre: 'Instructor Asignado',
       instructorLiderEmail: 'instructor@correo.edu.co',
       modalidad: (row.modalidad as any) || 'Presencial Diurna',

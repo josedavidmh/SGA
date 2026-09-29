@@ -1,3 +1,4 @@
+import { claveNombrePersona } from '../lib/nombresInstructor';
 import * as XLSX from 'xlsx';
 import { Competencia, ActividadSeguimiento, RegistroHorasEjecutadas, TipoCompetencia, RapSeguimiento, TotalesHorasSofia } from '../types';
 import { generarUuid } from '../lib/id';
@@ -495,8 +496,19 @@ export function calcularComparativoCompetencias(
     // están asignados a algún RAP de la competencia vía Seguimiento (rapsSeguimiento),
     // para que la fila colapsada no diga "Sin reporte de horas" cuando en realidad ya
     // hay instructor(es) asignado(s) en el detalle de RAPs.
-    const instructoresSet = new Set<string>(execData.instructores);
-    instructoresRapsSeg?.forEach(nombre => instructoresSet.add(nombre));
+    // Una misma persona puede venir escrita distinto según la fuente (p.ej.
+    // "JOSÉ DAVID…" en la planta y "JOSE DAVID…" en el archivo de SofiaPlus):
+    // se unifica por nombre sin tildes/títulos y se muestra una sola vez.
+    const porClave = new Map<string, string>();
+    instructoresRapsSeg?.forEach(nombre => {
+      const k = claveNombrePersona(nombre);
+      if (k && !porClave.has(k)) porClave.set(k, nombre);
+    });
+    execData.instructores.forEach(nombre => {
+      const k = claveNombrePersona(nombre);
+      if (k && !porClave.has(k)) porClave.set(k, nombre);
+    });
+    const instructoresSet = new Set<string>(porClave.values());
 
     resultado.push({
       competenciaCodigo: comp.codigo,

@@ -19,9 +19,17 @@ export function claveNombrePersona(nombre: string): string {
     .join(' ');
 }
 
-/** Nombre en el formato estándar del sistema (MAYÚSCULAS, como SofiaPlus). */
+/**
+ * Nombre en el formato estándar del sistema: MAYÚSCULAS y SIN TILDES, igual
+ * que SofiaPlus ("JOSE DAVID MONTESINO HOYOS"). La Ñ se conserva.
+ */
 export function nombreEnMayusculas(nombre: string): string {
-  return (nombre || '').replace(/\s+/g, ' ').trim().toLocaleUpperCase('es-CO');
+  return (nombre || '')
+    .replace(/ñ/g, '\u0000').replace(/Ñ/g, '\u0000')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\u0000/g, 'Ñ')
+    .replace(/\s+/g, ' ').trim()
+    .toUpperCase();
 }
 
 /** Nombres, apellidos y nombre completo del instructor en MAYÚSCULAS y sin títulos. */

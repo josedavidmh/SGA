@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Ficha, Instructor, ProgramaFormacion, AmbienteAprendizaje } from '../types';
 import { generarUuid } from '../lib/id';
+import { InstructorSearchSelect } from './InstructorSearchSelect';
 import { insertFichaInSupabase } from '../services/supabaseService';
 import { isSupabaseConfigured } from '../lib/supabaseClient';
 
@@ -61,7 +62,7 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
   // El Instructor Líder SIEMPRE se selecciona de la lista de instructores ya
   // registrados (nunca se captura manualmente desde este formulario) — el
   // alta de instructores nuevos vive únicamente en el módulo Instructores.
-  const [instructorLiderId, setInstructorLiderId] = React.useState(instructores[0]?.id || '');
+  const [instructorLiderId, setInstructorLiderId] = React.useState('');
 
   // Horas Lectivas (incluye trabajo autónomo) y Etapa Productiva
   const [horasDirectas, setHorasDirectas] = React.useState(3120);
@@ -92,7 +93,8 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
       setFechaFin(fichaEditar.fechaFin || '2027-12-15');
       setMatriculaInicial(fichaEditar.matriculaInicial || 32);
       const instExiste = instructores.some(i => i.id === fichaEditar.instructorLiderId);
-      setInstructorLiderId(instExiste ? fichaEditar.instructorLiderId : (instructores[0]?.id || ''));
+      // Si la ficha no tiene líder válido, queda sin líder (no se asigna uno cualquiera).
+      setInstructorLiderId(instExiste ? fichaEditar.instructorLiderId : '');
       setHorasDirectas(fichaEditar.horasDirectasTotales || 3120);
       setHorasIndependientes(fichaEditar.horasIndependientesTotales || 864);
     } else {
@@ -107,7 +109,7 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
       setFechaInicio('2026-07-01');
       setFechaFin('2027-12-15');
       setMatriculaInicial(32);
-      setInstructorLiderId(instructores[0]?.id || '');
+      setInstructorLiderId('');
       setHorasDirectas(3120);
       setHorasIndependientes(864);
     }
@@ -139,9 +141,10 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
       return;
     }
 
-    let finalInstId = 'inst_por_asignar';
-    let finalInstNombre = 'Instructor Por Asignar';
-    let finalInstEmail = 'instructor@correo.edu.co';
+    // Sin líder todavía: se guarda vacío (en Supabase queda NULL), no un id inventado.
+    let finalInstId = '';
+    let finalInstNombre = 'Por asignar';
+    let finalInstEmail = '';
 
     if (instructorLiderId) {
       const instLider = instructores.find(i => i.id === instructorLiderId);
@@ -473,20 +476,18 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
             </div>
 
             {instructores.length > 0 ? (
-              <div>
-                <select
-                  value={instructorLiderId}
-                  onChange={(e) => setInstructorLiderId(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-[#111C2D] outline-none focus:border-[#0D631B]"
-                >
-                  {instructores.map(inst => (
-                    <option key={inst.id} value={inst.id}>
-                      {inst.nombreCompleto} — {inst.especialidad} ({inst.email})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Este instructor será el responsable directo de esta cohorte académica.
+              <div className="space-y-1.5">
+                {/* Mismo selector con buscador que en Seguimiento */}
+                <InstructorSearchSelect
+                  instructores={instructores}
+                  selectedId={instructorLiderId}
+                  onChange={setInstructorLiderId}
+                  textoSinInstructor="— Sin instructor líder por ahora —"
+                  mostrarCorreo
+                  tamano="md"
+                />
+                <p className="text-[11px] text-slate-500">
+                  Este instructor será el responsable directo de esta cohorte académica. Puedes dejarlo sin líder y asignarlo después.
                 </p>
               </div>
             ) : (

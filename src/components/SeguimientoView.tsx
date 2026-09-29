@@ -1,5 +1,4 @@
 import React from 'react';
-import { createPortal } from 'react-dom';
 import { 
   FileSpreadsheet, 
   CheckCircle2, 
@@ -46,12 +45,17 @@ import {
   BloqueHorario,
   ReporteJuiciosFicha,
   RapSeguimiento,
+  RegistroArchivoSeguimiento,
   EstadoRap
 } from '../types';
 import { exportarSeguimientoExcel } from '../services/excelService';
+import { InstructorSearchSelect } from './InstructorSearchSelect';
 import {
   exportarResultadosSeguimientoExcel,
   exportarResultadosSeguimientoPDF,
+  exportarMatrizActividadesExcel,
+  exportarMatrizActividadesPDF,
+  FilaMatrizActividad,
   FilaResultadoSeguimiento
 } from '../services/reporteResultadosSeguimientoService';
 import { useSeguimientoCurricular } from '../hooks/useSeguimientoCurricular';
@@ -68,6 +72,8 @@ interface SeguimientoProps {
   horarios?: BloqueHorario[];
   reportesJuicios?: Record<string, ReporteJuiciosFicha>;
   rapsSeguimiento?: RapSeguimiento[];
+  /** Planeación pedagógica cargada (fases, actividades de proyecto y de aprendizaje por RAP). */
+  registrosArchivoSeguimiento?: RegistroArchivoSeguimiento[];
   onUpdateEstado: (actividadId: string, nuevoEstado: EstadoActividad) => void;
   onUpdateActividad?: (actividad: ActividadSeguimiento) => void;
   onActualizarRapSeguimiento?: (item: RapSeguimiento) => void;
@@ -87,6 +93,7 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
   horarios = [],
   reportesJuicios = {},
   rapsSeguimiento = [],
+  registrosArchivoSeguimiento = [],
   onUpdateEstado,
   onActualizarRapSeguimiento,
   onSelectFicha,
@@ -122,15 +129,11 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
     countOk,
     countAlerta,
     countAvanzado,
-    totalCalificadas,
-    totalEnEjecucion,
-    totalPendientes,
     getRapsDeCompetencia,
     getRapSeguimientoData,
     handleCambiarInstructorRap,
     handleCambiarEstadoRap,
-    statsRaps,
-    handleNextEstadoActividad
+    statsRaps
   } = useSeguimientoCurricular({
     ficha,
     actividades,
@@ -172,16 +175,42 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
     mostrarToast('Estado del RAP actualizado');
   };
 
-  const manejarSiguienteEstadoActividad = (id: string, current: EstadoActividad) => {
-    handleNextEstadoActividad(id, current);
-    mostrarToast('Estado de la actividad actualizado');
-  };
 
-  // Filtrar actividades por ficha actual (GPFI-F-134)
-  const actividadesFiltradas = fichaActividades.filter(a => {
-    if (filtroFase === 'TODAS') return true;
-    return a.fase.toLowerCase().includes(filtroFase.toLowerCase());
-  });
+  // MATRIZ DE ACTIVIDADES: se arma con la PLANEACIÓN PEDAGÓGICA cargada para
+  // el programa de la ficha (fase → actividad de proyecto → competencia/RAP →
+  // actividad de aprendizaje). El instructor y el estado salen del
+  // seguimiento del RAP, así la matriz y el comparativo nunca se contradicen.
+  const filasMatriz = React.useMemo(() => {
+    if (!ficha) return [];
+    const numFase = (f: string) => { const m = (f || '').match(/(\d+)/); return m ? Number(m[1]) : 99; };
+    return registrosArchivoSeguimiento
+      .filter(r => r.programaCodigo === ficha.programaCodigo)
+      .map((r, idx) => {
+        const rapLike = { codigoRap: r.rapCodigo, denominacion: r.rapDenominacion, competenciaCodigo: r.competenciaCodigo } as ResultadoAprendizaje;
+        const data = getRapSeguimientoData(r.competenciaCodigo, r.competenciaDenominacion, rapLike);
+        return { registro: r, rap: rapLike, idx, estado: data.estado as EstadoRap, instructorNombre: data.instructorNombre || '' };
+      })
+      .sort((a, b) => numFase(a.registro.fase) - numFase(b.registro.fase) || a.idx - b.idx);
+  }, [ficha, registrosArchivoSeguimiento, getRapSeguimientoData]);
+
+  // Las fases se toman tal cual de la planeación (p.ej. las 4: Análisis,
+  // Planeación, Ejecución y Evaluación), en su orden.
+  const fasesPlaneacion = React.useMemo(() => {
+    const vistas: string[] = [];
+    filasMatriz.forEach(f => { const fase = (f.registro.fase || 'Sin fase').trim(); if (!vistas.includes(fase)) vistas.push(fase); });
+    return vistas;
+  }, [filasMatriz]);
+
+  const filasMatrizFiltradas = filtroFase === 'TODAS'
+    ? filasMatriz
+    : filasMatriz.filter(f => (f.registro.fase || 'Sin fase').trim() === filtroFase);
+
+  // Si la fase elegida ya no existe (cambio de ficha/programa), vuelve a "Todas".
+  React.useEffect(() => {
+    if (filtroFase !== 'TODAS' && !fasesPlaneacion.includes(filtroFase)) setFiltroFase('TODAS');
+  }, [fasesPlaneacion, filtroFase]);
+
+  const SIGUIENTE_ESTADO: Record<string, EstadoRap> = { PENDIENTE: 'EN_EJECUCION', EN_EJECUCION: 'CALIFICADO', CALIFICADO: 'PENDIENTE', SIN_CALIFICAR: 'CALIFICADO' };
 
   // Prioridad de atención: lo que necesita acción (Alerta) primero, luego OK, luego
   // Avanzada — aplica el efecto Von Restorff llevando lo urgente al inicio de la tabla
@@ -233,16 +262,48 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
 
   const todosExpandidos = comparativoLista.length > 0 && comparativoLista.every(c => expandedComps[c.competenciaCodigo]);
 
+  const ETIQUETA_ESTADO_RAP_UI: Record<string, string> = { PENDIENTE: 'PENDIENTE', EN_EJECUCION: 'EN EJECUCIÓN', CALIFICADO: 'EVALUADO', SIN_CALIFICAR: 'SIN EVALUAR' };
+
+  // Filtros activos en pantalla, en palabras (se muestran en la vista y se
+  // imprimen en el encabezado del reporte exportado).
+  const ETIQUETA_SEMAFORO_FILTRO: Record<string, string> = { OK: 'OK (70%-80%)', ALERTA: 'Alerta (<70%)', AVANZADO: 'Avanzada (>80%)' };
+  const ETIQUETA_ESTADO_FILTRO: Record<string, string> = { PENDIENTE: 'Pendientes', EN_EJECUCION: 'En ejecución', CALIFICADO: 'Evaluados', SIN_CALIFICAR: 'Sin evaluar' };
+  const filtrosActivos = React.useMemo(() => {
+    const f: { clave: string; texto: string; quitar: () => void }[] = [];
+    if (filtroTexto.trim()) f.push({ clave: 'texto', texto: `Búsqueda: "${filtroTexto.trim()}"`, quitar: () => setFiltroTexto('') });
+    if (filtroSemaforo !== 'TODAS') f.push({ clave: 'semaforo', texto: `Semáforo: ${ETIQUETA_SEMAFORO_FILTRO[filtroSemaforo] || filtroSemaforo}`, quitar: () => setFiltroSemaforo('TODAS') });
+    if (filtroTipoComp !== 'TODAS') f.push({ clave: 'tipo', texto: `Tipo: ${filtroTipoComp}`, quitar: () => setFiltroTipoComp('TODAS') });
+    if (filtroEstadoRap !== 'TODOS') f.push({ clave: 'estado', texto: `Estado RAP: ${ETIQUETA_ESTADO_FILTRO[filtroEstadoRap] || filtroEstadoRap}`, quitar: () => setFiltroEstadoRap('TODOS') });
+    return f;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtroTexto, filtroSemaforo, filtroTipoComp, filtroEstadoRap]);
+
+  const limpiarFiltros = () => {
+    setFiltroTexto('');
+    setFiltroSemaforo('TODAS');
+    setFiltroTipoComp('TODAS');
+    setFiltroEstadoRap('TODOS');
+  };
+
   // Filas planas Competencia+RAP para el reporte de "Resultados de Seguimiento"
-  // (PDF/Excel). Se arma sobre el comparativo COMPLETO de la ficha (no el filtrado
-  // en pantalla) para que el reporte sea siempre un registro íntegro de la ficha,
-  // sin depender de qué filtro haya quedado activo en la vista.
+  // (PDF/Excel). Refleja EXACTAMENTE lo que se ve en pantalla: las competencias
+  // que pasan los filtros (búsqueda, semáforo, tipo) y, dentro de cada una, los
+  // RAPs del estado filtrado. Sin filtros, sale el reporte completo de la ficha.
   const filasResultadoExport = React.useMemo<FilaResultadoSeguimiento[]>(() => {
     const filas: FilaResultadoSeguimiento[] = [];
-    comparativoLista.forEach(comp => {
+    const txt = filtroTexto.trim().toLowerCase();
+    comparativoFiltrado.forEach(comp => {
       const compRaps = getRapsDeCompetencia(comp.competenciaCodigo, comp.competenciaDenominacion);
+      // Si la búsqueda coincide con la competencia o su instructor, van todos
+      // sus RAPs; si solo coincide con algunos RAPs, van solo esos.
+      const coincideComp = !txt ||
+        comp.competenciaCodigo.toLowerCase().includes(txt) ||
+        comp.competenciaDenominacion.toLowerCase().includes(txt) ||
+        comp.instructoresNombres.some(i => i.toLowerCase().includes(txt));
       compRaps.forEach(rap => {
+        if (!coincideComp && !(rap.codigoRap.toLowerCase().includes(txt) || rap.denominacion.toLowerCase().includes(txt))) return;
         const data = getRapSeguimientoData(comp.competenciaCodigo, comp.competenciaDenominacion, rap);
+        if (filtroEstadoRap !== 'TODOS' && data.estado !== filtroEstadoRap) return;
         filas.push({
           competenciaCodigo: comp.competenciaCodigo,
           competenciaDenominacion: comp.competenciaDenominacion,
@@ -259,7 +320,7 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
       });
     });
     return filas;
-  }, [comparativoLista, getRapsDeCompetencia, getRapSeguimientoData]);
+  }, [comparativoFiltrado, filtroTexto, filtroEstadoRap, getRapsDeCompetencia, getRapSeguimientoData]);
 
   // Menú desplegable de exportación de resultados (Hick's Law: un solo punto de
   // entrada "Exportar Resultados" con dos opciones, en vez de sumar más botones
@@ -278,18 +339,48 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
     return () => document.removeEventListener('mousedown', handleClickFuera);
   }, [menuExportAbierto]);
 
+  // La exportación corresponde a la pestaña en la que está el usuario:
+  // Comparativo → resultados por competencia/RAP; Matriz → matriz de
+  // actividades (con la fase filtrada).
+  const filtrosMatriz = filtroFase === 'TODAS' ? [] : [`Fase: ${filtroFase}`];
+  const filasMatrizExport: FilaMatrizActividad[] = filasMatrizFiltradas.map(({ registro: r, estado, instructorNombre }) => ({
+    fase: r.fase,
+    actividadProyecto: r.actividadProyecto,
+    competenciaCodigo: r.competenciaCodigo,
+    competenciaDenominacion: r.competenciaDenominacion,
+    rapCodigo: r.rapCodigo,
+    rapDenominacion: r.rapDenominacion,
+    actividadAprendizaje: r.actividadAprendizaje,
+    horasDirectas: r.horasTrabajoDirecto,
+    horasIndependientes: r.horasTrabajoIndependiente,
+    instructorNombre,
+    estadoRap: estado
+  }));
+
   const manejarExportarResultadosExcel = () => {
     if (!ficha) return;
-    exportarResultadosSeguimientoExcel(ficha, filasResultadoExport);
+    if (subTab === 'ACTIVIDADES') {
+      exportarMatrizActividadesExcel(ficha, filasMatrizExport, filtrosMatriz);
+      setMenuExportAbierto(false);
+      mostrarToast(`Matriz de actividades exportada en Excel (${filasMatrizExport.length} actividades)`);
+      return;
+    }
+    exportarResultadosSeguimientoExcel(ficha, filasResultadoExport, filtrosActivos.map(f => f.texto));
     setMenuExportAbierto(false);
-    mostrarToast('Reporte de resultados exportado en Excel');
+    mostrarToast(filtrosActivos.length > 0 ? `Reporte filtrado exportado en Excel (${filasResultadoExport.length} RAPs)` : 'Reporte de resultados exportado en Excel');
   };
 
   const manejarExportarResultadosPDF = () => {
     if (!ficha) return;
-    exportarResultadosSeguimientoPDF(ficha, filasResultadoExport);
+    if (subTab === 'ACTIVIDADES') {
+      exportarMatrizActividadesPDF(ficha, filasMatrizExport, filtrosMatriz);
+      setMenuExportAbierto(false);
+      mostrarToast(`Matriz de actividades exportada en PDF (${filasMatrizExport.length} actividades)`);
+      return;
+    }
+    exportarResultadosSeguimientoPDF(ficha, filasResultadoExport, filtrosActivos.map(f => f.texto));
     setMenuExportAbierto(false);
-    mostrarToast('Reporte de resultados exportado en PDF');
+    mostrarToast(filtrosActivos.length > 0 ? `Reporte filtrado exportado en PDF (${filasResultadoExport.length} RAPs)` : 'Reporte de resultados exportado en PDF');
   };
 
   if (!ficha) {
@@ -393,8 +484,27 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
             {menuExportAbierto && (
               <div className="absolute right-0 top-full mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden z-30 animate-in fade-in duration-150">
                 <div className="px-3.5 py-2.5 border-b border-slate-100">
-                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Resultados de Seguimiento</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Competencias y RAPs: calificados, pendientes y en ejecución</p>
+                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    {subTab === 'ACTIVIDADES' ? 'Matriz de Actividades' : 'Resultados de Seguimiento'}
+                  </p>
+                  {subTab === 'ACTIVIDADES' ? (
+                    <p className={`text-[10px] mt-0.5 ${filtrosMatriz.length > 0 ? 'font-bold text-[#0D631B]' : 'text-slate-400'}`}>
+                      {filtrosMatriz.length > 0
+                        ? `Se exporta lo filtrado: ${filtroFase} (${filasMatrizExport.length} actividades)`
+                        : `Todas las fases (${filasMatrizExport.length} actividades)`}
+                    </p>
+                  ) : filtrosActivos.length > 0 ? (
+                    <div className="mt-1.5 space-y-1">
+                      <p className="text-[10px] font-bold text-[#0D631B]">Se exporta lo filtrado ({filasResultadoExport.length} RAPs):</p>
+                      <div className="flex flex-wrap gap-1">
+                        {filtrosActivos.map(f => (
+                          <span key={f.clave} className="px-1.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-[10px] font-semibold text-[#0D631B]">{f.texto}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-400 mt-0.5">Sin filtros: reporte completo ({filasResultadoExport.length} RAPs)</p>
+                  )}
                 </div>
                 <button
                   onClick={manejarExportarResultadosExcel}
@@ -446,7 +556,7 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
           }`}
         >
           <Layers className="w-4 h-4 text-[#005A8C]" />
-          <span>Matriz de Actividades GPFI-F-134 ({fichaActividades.length})</span>
+          <span>Matriz de Actividades GPFI-F-134 ({filasMatriz.length})</span>
         </button>
       </div>
 
@@ -599,9 +709,9 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
                   ? 'bg-emerald-600 border-emerald-600 text-white ring-2 ring-emerald-200'
                   : 'bg-emerald-100 border-emerald-300 text-emerald-900 hover:border-emerald-500'
               }`}
-              title="Filtrar: mostrar solo RAPs Calificadas"
+              title="Filtrar: mostrar solo RAPs Evaluados"
             >
-              🟢 {statsRaps.calificadas} Calificadas
+              🟢 {statsRaps.calificadas} Evaluados
             </button>
             <button
               type="button"
@@ -611,9 +721,9 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
                   ? 'bg-rose-600 border-rose-600 text-white ring-2 ring-rose-200'
                   : 'bg-rose-100 border-rose-300 text-rose-900 hover:border-rose-500'
               }`}
-              title="Filtrar: mostrar solo RAPs Sin Calificar"
+              title="Filtrar: mostrar solo RAPs Sin Evaluar"
             >
-              🔴 {statsRaps.sinCalificar} Sin Calificar
+              🔴 {statsRaps.sinCalificar} Sin Evaluar
             </button>
 
             {/* Reiniciar filtro: vuelve a mostrar todo tal como estaba, sin
@@ -716,6 +826,36 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Lo que se está filtrando ahora (y que saldrá en el reporte exportado) */}
+            {filtrosActivos.length > 0 && (
+              <div className="px-4 py-2.5 border-b border-slate-100 bg-emerald-50/50 flex flex-wrap items-center gap-2 text-[11px]">
+                <span className="font-bold text-[#0D631B]">Mostrando:</span>
+                {filtrosActivos.map(f => (
+                  <span key={f.clave} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-white border border-emerald-200 text-[#0D631B] font-semibold">
+                    {f.texto}
+                    <button
+                      type="button"
+                      onClick={f.quitar}
+                      className="w-4 h-4 rounded-full flex items-center justify-center text-emerald-600 hover:bg-emerald-100"
+                      title="Quitar este filtro"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <span className="text-slate-500">
+                  · {comparativoFiltrado.length} de {comparativoLista.length} competencias · {filasResultadoExport.length} RAPs
+                </span>
+                <button
+                  type="button"
+                  onClick={limpiarFiltros}
+                  className="ml-auto text-[11px] font-bold text-slate-500 hover:text-slate-800 underline underline-offset-2"
+                >
+                  Quitar todos
+                </button>
+              </div>
+            )}
 
             {/* Tabla Principal */}
             <div className="overflow-x-auto">
@@ -1065,8 +1205,8 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
                                                 >
                                                   <option value="PENDIENTE">⚪ PENDIENTE</option>
                                                   <option value="EN_EJECUCION">🟠 EN EJECUCIÓN</option>
-                                                  <option value="CALIFICADO">🟢 CALIFICADA</option>
-                                                  <option value="SIN_CALIFICAR">🔴 SIN CALIFICAR</option>
+                                                  <option value="CALIFICADO">🟢 EVALUADO</option>
+                                                  <option value="SIN_CALIFICAR">🔴 SIN EVALUAR</option>
                                                 </select>
                                               </td>
                                             </tr>
@@ -1119,63 +1259,9 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
       {/* ========================================================================= */}
       {subTab === 'ACTIVIDADES' && (
         <div className="space-y-5 animate-in fade-in duration-200">
-          {/* Tarjetas Bento de Resumen de Estados */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
-              <div>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Estado Consolidado
-                </div>
-                <div className="text-2xl font-black text-[#2E7D32] mt-0.5">
-                  {totalCalificadas} <span className="text-xs font-bold text-slate-500">Actividades</span>
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  {Math.round((totalCalificadas / (fichaActividades.length || 1)) * 100)}% del plan curricular calificado
-                </div>
-              </div>
-              <div className="w-12 h-12 rounded-xl bg-[#E8F5E9] text-[#2E7D32] border border-[#C8E6C9] flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-6 h-6" />
-              </div>
-            </div>
-
-            <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
-              <div>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  En Aula / Taller
-                </div>
-                <div className="text-2xl font-black text-[#005A8C] mt-0.5">
-                  {totalEnEjecucion} <span className="text-xs font-bold text-slate-500">Actividades</span>
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  Desarrollo activo en trimestre actual
-                </div>
-              </div>
-              <div className="w-12 h-12 rounded-xl bg-[#E1F5FE] text-[#005A8C] border border-[#B3E5FC] flex items-center justify-center shrink-0">
-                <Clock className="w-6 h-6" />
-              </div>
-            </div>
-
-            <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
-              <div>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Programadas Próximas
-                </div>
-                <div className="text-2xl font-black text-[#FFA000] mt-0.5">
-                  {totalPendientes} <span className="text-xs font-bold text-slate-500">Actividades</span>
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  Proyectadas para fase de cierre y evaluación
-                </div>
-              </div>
-              <div className="w-12 h-12 rounded-xl bg-[#FFF8E1] text-[#FFA000] border border-[#FFE082] flex items-center justify-center shrink-0">
-                <AlertCircle className="w-6 h-6" />
-              </div>
-            </div>
-          </div>
-
-          {/* Matriz Curricular y Actividades */}
+          {/* Matriz Curricular y Actividades (desde la planeación pedagógica) */}
           <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
               <div>
                 <div className="flex items-center space-x-2">
                   <h2 className="text-base font-black text-[#111C2D]">
@@ -1186,132 +1272,129 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Actualice el progreso curricular haciendo clic directamente en los selectores de estado.
+                  Actividades tomadas de la planeación pedagógica. El instructor y el estado son los del RAP en Seguimiento; al cambiar el estado aquí cambia para todo el RAP.
                 </p>
               </div>
 
-              {/* Filtro por Fase */}
-              <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl text-xs font-medium">
+              {/* Filtro por Fase (las fases de la planeación cargada) */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-medium flex-wrap">
                 <button
                   onClick={() => setFiltroFase('TODAS')}
                   className={`px-3 py-1 rounded-lg transition-all ${
                     filtroFase === 'TODAS' ? 'bg-white text-[#111C2D] font-bold shadow-xs' : 'text-slate-500 hover:text-slate-900'
                   }`}
                 >
-                  Todas ({fichaActividades.length})
+                  Todas ({filasMatriz.length})
                 </button>
-                <button
-                  onClick={() => setFiltroFase('Análisis')}
-                  className={`px-3 py-1 rounded-lg transition-all ${
-                    filtroFase === 'Análisis' ? 'bg-white text-[#111C2D] font-bold shadow-xs' : 'text-slate-500 hover:text-slate-900'
-                  }`}
-                >
-                  Fase 1: Análisis
-                </button>
-                <button
-                  onClick={() => setFiltroFase('Planeación')}
-                  className={`px-3 py-1 rounded-lg transition-all ${
-                    filtroFase === 'Planeación' ? 'bg-white text-[#111C2D] font-bold shadow-xs' : 'text-slate-500 hover:text-slate-900'
-                  }`}
-                >
-                  Fase 2: Planeación
-                </button>
-                <button
-                  onClick={() => setFiltroFase('Ejecución')}
-                  className={`px-3 py-1 rounded-lg transition-all ${
-                    filtroFase === 'Ejecución' ? 'bg-white text-[#111C2D] font-bold shadow-xs' : 'text-slate-500 hover:text-slate-900'
-                  }`}
-                >
-                  Fase 3: Ejecución
-                </button>
+                {fasesPlaneacion.map(fase => (
+                  <button
+                    key={fase}
+                    onClick={() => setFiltroFase(fase)}
+                    className={`px-3 py-1 rounded-lg transition-all ${
+                      filtroFase === fase ? 'bg-white text-[#111C2D] font-bold shadow-xs' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    {fase} ({filasMatriz.filter(f => (f.registro.fase || 'Sin fase').trim() === fase).length})
+                  </button>
+                ))}
               </div>
             </div>
 
             {/* Tabla de Actividades Curriculares */}
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse min-w-[760px]">
+              <table className="w-full table-fixed text-left text-xs border-collapse min-w-[1100px]">
+                <colgroup>
+                  <col className="w-[19%]" />
+                  <col className="w-[21%]" />
+                  <col className="w-[28%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[11%]" />
+                </colgroup>
                 <thead>
                   <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase text-[10px] tracking-wider bg-slate-50/60">
-                    <th className="py-3 px-3">Fase & Competencia</th>
-                    <th className="py-3 px-3">RAP / Código</th>
+                    <th className="py-3 px-3">Fase & Actividad de Proyecto</th>
+                    <th className="py-3 px-3">Competencia & RAP</th>
                     <th className="py-3 px-3">Actividad de Aprendizaje</th>
                     <th className="py-3 px-3 text-center">Horas</th>
                     <th className="py-3 px-3">Instructor Responsable</th>
-                    <th className="py-3 px-3 text-right">Estado Curricular</th>
+                    <th className="py-3 px-3 text-right">Estado</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {actividadesFiltradas.length === 0 ? (
+                  {filasMatriz.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-slate-400">
-                        No hay actividades registradas para esta fase.
+                      <td colSpan={6} className="py-10 text-center text-slate-400">
+                        No hay planeación pedagógica cargada para el programa {ficha.programaCodigo}. Cárgala en Ingesta (Archivo de Seguimiento) para ver aquí sus actividades.
                       </td>
                     </tr>
-                  ) : actividadesFiltradas.map(a => (
-                    <tr key={a.id} className="hover:bg-[#F8F9FA] transition-colors">
-                      <td className="py-3.5 px-3 align-top max-w-xs">
-                        <div className="font-bold text-[11px] text-[#6F43C0] uppercase flex items-center space-x-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#6F43C0]"></span>
-                          <span>{a.fase}</span>
+                  ) : filasMatrizFiltradas.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-400">No hay actividades en esta fase.</td>
+                    </tr>
+                  ) : filasMatrizFiltradas.map(({ registro: r, rap, estado, instructorNombre }) => (
+                    <tr key={r.id} className="hover:bg-[#F8F9FA] transition-colors">
+                      <td className="py-3.5 px-3 align-top break-words">
+                        <div className="font-bold text-[10px] text-[#6F43C0] uppercase flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#6F43C0] shrink-0"></span>
+                          <span>{r.fase}</span>
                         </div>
-                        <div className="font-bold text-[#111C2D] mt-0.5">{a.competenciaCodigo}</div>
-                        <div className="text-[11px] text-slate-500 line-clamp-2">{a.competenciaDenominacion}</div>
+                        <div className="text-[11px] font-semibold text-slate-700 mt-1 leading-snug">{r.actividadProyecto || '—'}</div>
                       </td>
 
-                      <td className="py-3.5 px-3 align-top whitespace-nowrap">
-                        <span className="px-2 py-0.5 rounded font-black text-[10px] bg-slate-100 text-slate-700">
-                          {a.rapCodigo}
-                        </span>
-                        <div className="text-[11px] text-slate-600 font-medium mt-1 max-w-[180px]">
-                          {a.rapDenominacion}
+                      <td className="py-3.5 px-3 align-top break-words">
+                        <div className="font-bold text-[#111C2D]">{r.competenciaCodigo}</div>
+                        <div className="text-[11px] text-slate-500 line-clamp-2" title={r.competenciaDenominacion}>{r.competenciaDenominacion}</div>
+                        <div className="mt-1.5 flex items-start gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded font-black text-[10px] bg-slate-100 text-slate-700 shrink-0">{r.rapCodigo}</span>
+                          <span className="text-[11px] text-slate-600 leading-snug">{r.rapDenominacion}</span>
                         </div>
                       </td>
 
-                      <td className="py-3.5 px-3 align-top max-w-md">
-                        <div className="font-semibold text-[#111C2D] text-xs leading-snug">
-                          {a.actividadAprendizaje}
-                        </div>
-                        <div className="text-[11px] text-slate-400 flex items-center space-x-1 mt-1 font-mono">
-                          <span>Evidencia: {a.evidenciaCodigo}</span>
-                        </div>
+                      <td className="py-3.5 px-3 align-top break-words">
+                        <div className="text-xs text-[#111C2D] leading-snug">{r.actividadAprendizaje || '—'}</div>
                       </td>
 
                       <td className="py-3.5 px-3 align-top text-center">
                         <div className="flex flex-col items-center gap-0.5">
-                          <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md font-bold text-[11px]">
-                            {a.horasDirectas}h directo
+                          <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md font-bold text-[11px] whitespace-nowrap">
+                            {r.horasTrabajoDirecto}h directo
                           </span>
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md font-medium text-[10px]">
-                            {a.horasIndependientes}h indep.
+                          <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md font-medium text-[10px] whitespace-nowrap">
+                            {r.horasTrabajoIndependiente}h indep.
                           </span>
                         </div>
                       </td>
 
-                      <td className="py-3.5 px-3 align-top whitespace-nowrap">
-                        <div className="flex items-center space-x-2">
-                          <div className="w-6 h-6 rounded-full bg-[#0D631B] text-white flex items-center justify-center font-bold text-[10px]">
-                            {a.instructorNombre ? a.instructorNombre.split(' ').slice(1).join(' ')[0] : 'I'}
+                      <td className="py-3.5 px-3 align-top break-words">
+                        {instructorNombre ? (
+                          <div className="flex items-start gap-2">
+                            <div className="w-6 h-6 rounded-full bg-[#0D631B] text-white flex items-center justify-center font-bold text-[10px] shrink-0">
+                              {instructorNombre.trim()[0] || 'I'}
+                            </div>
+                            <div className="font-bold text-[#111C2D] text-[11px] leading-snug">{instructorNombre}</div>
                           </div>
-                          <div className="font-bold text-[#111C2D] text-xs">
-                            {a.instructorNombre || 'Sin Asignar'}
-                          </div>
-                        </div>
+                        ) : (
+                          <span className="text-slate-400 italic text-[11px]">Sin asignar</span>
+                        )}
                       </td>
 
-                      <td className="py-3.5 px-3 align-top text-right whitespace-nowrap">
+                      <td className="py-3.5 px-3 align-top text-right">
                         <button
-                          id={`btn-toggle-estado-${a.id}`}
-                          onClick={() => manejarSiguienteEstadoActividad(a.id, a.estado)}
-                          className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all inline-flex items-center space-x-1.5 shadow-xs ${
-                            a.estado === 'CALIFICADO'
+                          type="button"
+                          onClick={() => manejarCambioEstadoRap(r.competenciaCodigo, r.competenciaDenominacion, rap, SIGUIENTE_ESTADO[estado] || 'EN_EJECUCION')}
+                          className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold transition-all inline-flex items-center gap-1 shadow-xs whitespace-nowrap ${
+                            estado === 'CALIFICADO'
                               ? 'bg-[#E8F5E9] text-[#2E7D32] border border-[#C8E6C9] hover:bg-[#d4f2d6]'
-                              : a.estado === 'EN EJECUCION'
+                              : estado === 'EN_EJECUCION'
                               ? 'bg-[#E1F5FE] text-[#005A8C] border border-[#B3E5FC] hover:bg-[#cbeeff]'
+                              : estado === 'SIN_CALIFICAR'
+                              ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
                               : 'bg-[#FFF8E1] text-[#C67C00] border border-[#FFE082] hover:bg-[#fff2c8]'
                           }`}
-                          title="Haga clic para alternar: PENDIENTE -> EN EJECUCION -> CALIFICADO"
+                          title="Clic para cambiar: PENDIENTE → EN EJECUCIÓN → EVALUADO (aplica a todo el RAP)"
                         >
-                          <span>{a.estado}</span>
+                          <span>{ETIQUETA_ESTADO_RAP_UI[estado] || estado}</span>
                           <ArrowUpDown className="w-3 h-3 opacity-60" />
                         </button>
                       </td>
@@ -1337,168 +1420,6 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
           <span>{toast.mensaje}</span>
         </div>
       )}
-    </div>
-  );
-};
-
-/**
- * Selector de instructor con buscador. Reemplaza el <select> nativo (difícil
- * de escanear con catálogos grandes de instructores — Ley de Hick) por un
- * combobox filtrable por nombre o especialidad. Cada instancia vive dentro de
- * la fila de UN RAP específico: su `onChange` está ligado por closure al
- * `rap`/`competencia` de esa fila exclusivamente, así que seleccionar un
- * instructor aquí solo puede actualizar ese registro, nunca otros.
- */
-interface InstructorSearchSelectProps {
-  instructores: Instructor[];
-  selectedId?: string;
-  /** Etiqueta de solo lectura cuando el instructor viene de Juicios SofiaPlus y no está en el catálogo editable. */
-  customLabel?: string;
-  onChange: (instructorId: string) => void;
-}
-
-const InstructorSearchSelect: React.FC<InstructorSearchSelectProps> = ({ instructores, selectedId, customLabel, onChange }) => {
-  const [abierto, setAbierto] = React.useState(false);
-  const [busqueda, setBusqueda] = React.useState('');
-  const botonRef = React.useRef<HTMLButtonElement>(null);
-  const panelRef = React.useRef<HTMLDivElement>(null);
-  // El panel se dibuja en <body> con posición fija (portal). Antes vivía
-  // dentro de la tabla, que tiene scroll horizontal (overflow-x-auto): eso
-  // recortaba todo lo que quedaba debajo del buscador, así que la lista de
-  // instructores existía pero nunca se veía.
-  const [posicion, setPosicion] = React.useState<{ top: number; left: number; abreArriba: boolean } | null>(null);
-
-  const ANCHO_PANEL = 288;
-  const ALTO_PANEL = 280;
-
-  const calcularPosicion = React.useCallback(() => {
-    const btn = botonRef.current;
-    if (!btn) return;
-    const r = btn.getBoundingClientRect();
-    const abreArriba = window.innerHeight - r.bottom < ALTO_PANEL && r.top > ALTO_PANEL;
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - ANCHO_PANEL - 8));
-    setPosicion({ top: abreArriba ? r.top - 4 : r.bottom + 4, left, abreArriba });
-  }, []);
-
-  const cerrar = React.useCallback(() => {
-    setAbierto(false);
-    setBusqueda('');
-  }, []);
-
-  React.useLayoutEffect(() => {
-    if (!abierto) return;
-    calcularPosicion();
-    const alMoverse = () => calcularPosicion();
-    window.addEventListener('scroll', alMoverse, true);
-    window.addEventListener('resize', alMoverse);
-    const handleClickFuera = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (botonRef.current?.contains(t) || panelRef.current?.contains(t)) return;
-      cerrar();
-    };
-    const handleEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') cerrar(); };
-    document.addEventListener('mousedown', handleClickFuera);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      window.removeEventListener('scroll', alMoverse, true);
-      window.removeEventListener('resize', alMoverse);
-      document.removeEventListener('mousedown', handleClickFuera);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [abierto, calcularPosicion, cerrar]);
-
-  const seleccionado = instructores.find(i => i.id === selectedId);
-  const etiquetaActual = seleccionado
-    ? `${seleccionado.nombreCompleto}${seleccionado.especialidad ? ` (${seleccionado.especialidad})` : ''}`
-    : customLabel || '';
-
-  const filtrados = React.useMemo(() => {
-    const txt = busqueda.trim().toLowerCase();
-    const base = [...instructores].sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto));
-    if (!txt) return base;
-    return base.filter(i =>
-      i.nombreCompleto.toLowerCase().includes(txt) ||
-      (i.especialidad && i.especialidad.toLowerCase().includes(txt))
-    );
-  }, [instructores, busqueda]);
-
-  const panel = abierto && posicion ? (
-    <div
-      ref={panelRef}
-      style={{
-        position: 'fixed',
-        left: posicion.left,
-        width: ANCHO_PANEL,
-        ...(posicion.abreArriba ? { bottom: window.innerHeight - posicion.top } : { top: posicion.top })
-      }}
-      className="z-[100] bg-white rounded-xl border border-slate-200 shadow-xl p-1.5 space-y-1"
-    >
-      <div className="relative">
-        <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input
-          autoFocus
-          type="text"
-          value={busqueda}
-          onChange={e => setBusqueda(e.target.value)}
-          placeholder="Buscar por nombre o especialidad..."
-          className="w-full pl-6 pr-2 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D631B]"
-        />
-      </div>
-      <div className="max-h-56 overflow-y-auto">
-        <button
-          type="button"
-          onClick={() => { onChange(''); cerrar(); }}
-          className="w-full text-left px-2 py-1.5 text-[11px] text-slate-500 rounded-lg hover:bg-slate-50"
-        >
-          -- Sin Instructor Asignado --
-        </button>
-        {instructores.length === 0 ? (
-          <div className="px-2 py-2 text-[11px] text-amber-700 bg-amber-50 rounded-lg">
-            No hay instructores registrados. Créalos en el módulo Instructores.
-          </div>
-        ) : filtrados.length === 0 ? (
-          <div className="px-2 py-2 text-[11px] text-slate-400 text-center">Sin resultados para "{busqueda}"</div>
-        ) : (
-          filtrados.map(inst => (
-            <button
-              key={inst.id}
-              type="button"
-              onClick={() => { onChange(inst.id); cerrar(); }}
-              className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-[#E8F5E9] ${
-                inst.id === selectedId ? 'bg-[#E8F5E9] font-bold text-[#0D631B]' : 'text-slate-700'
-              }`}
-            >
-              <span className="block truncate">{inst.nombreCompleto}</span>
-              {inst.especialidad && <span className="block text-[10px] text-slate-500 truncate">{inst.especialidad}</span>}
-            </button>
-          ))
-        )}
-        {customLabel && !seleccionado && (
-          <div className="px-2 py-1.5 text-[10px] text-slate-400 italic border-t border-slate-100 mt-1 pt-1.5">
-            Actual (fuera del catálogo): {customLabel}
-          </div>
-        )}
-      </div>
-    </div>
-  ) : null;
-
-  return (
-    <div className="relative">
-      <button
-        ref={botonRef}
-        type="button"
-        onClick={() => (abierto ? cerrar() : setAbierto(true))}
-        aria-expanded={abierto}
-        className={`w-full flex items-center justify-between space-x-1 text-xs font-semibold py-1.5 px-2.5 rounded-xl border transition-all text-left ${
-          seleccionado
-            ? 'bg-emerald-50/60 text-emerald-950 border-emerald-300'
-            : 'bg-white text-slate-500 border-slate-300'
-        }`}
-      >
-        <span className="truncate">{etiquetaActual || '-- Sin Instructor Asignado --'}</span>
-        <Search className="w-3 h-3 shrink-0 opacity-60" />
-      </button>
-      {panel && createPortal(panel, document.body)}
     </div>
   );
 };

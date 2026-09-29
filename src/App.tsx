@@ -1401,50 +1401,8 @@ export default function App() {
       console.error('Error al insertar ficha en Supabase:', err);
     });
 
-    // Generar automáticamente las actividades iniciales pedagógicas del plan para esta nueva ficha
-    const actividadesNuevas: ActividadSeguimiento[] = [
-      {
-        id: generarUuid(),
-        fichaId: nuevaFicha.id,
-        fase: 'Fase 1: Análisis',
-        competenciaCodigo: '220501092',
-        competenciaDenominacion: 'Levantamiento de requisitos del software según estándares curriculares',
-        rapCodigo: 'RAP 01',
-        rapDenominacion: 'Determinar los requisitos funcionales mediante entrevistas y diagramas',
-        actividadAprendizaje: 'Diseño del documento de especificación de requisitos de software (SRS IEEE 830)',
-        evidenciaCodigo: 'GA1-220501092-AA1-EV01',
-        horasDirectas: 40,
-        horasIndependientes: 10,
-        instructorId: nuevaFicha.instructorLiderId,
-        instructorNombre: nuevaFicha.instructorLiderNombre,
-        estado: 'EN EJECUCION',
-        fechaUltimaActualizacion: new Date().toLocaleDateString()
-      },
-      {
-        id: generarUuid(),
-        fichaId: nuevaFicha.id,
-        fase: 'Fase 2: Planeación',
-        competenciaCodigo: '220501093',
-        competenciaDenominacion: 'Modelado y diseño de bases de datos relacionales',
-        rapCodigo: 'RAP 02',
-        rapDenominacion: 'Elaborar el modelo conceptual y lógico de base de datos relacional',
-        actividadAprendizaje: 'Diagrama Entidad-Relación y script DDL de normalización 3FN',
-        evidenciaCodigo: 'GA2-220501093-AA1-EV02',
-        horasDirectas: 48,
-        horasIndependientes: 12,
-        instructorId: nuevaFicha.instructorLiderId,
-        instructorNombre: nuevaFicha.instructorLiderNombre,
-        estado: 'PENDIENTE',
-        fechaUltimaActualizacion: new Date().toLocaleDateString()
-      }
-    ];
-
-    setActividades(prev => [...actividadesNuevas, ...prev]);
-    actividadesNuevas.forEach(act => {
-      upsertActividadSeguimientoInSupabase(act).catch(err => {
-        console.error('Error al insertar actividad de seguimiento en Supabase:', err);
-      });
-    });
+    // (Ya no se generan actividades de ejemplo: la Matriz de Actividades se
+    // arma con la planeación pedagógica cargada para el programa.)
 
     registrarLog(
       'CREAR_FICHA_MANUAL',
@@ -3338,6 +3296,7 @@ export default function App() {
               horarios={horarios}
               reportesJuicios={reportesJuicios}
               rapsSeguimiento={rapsSeguimiento}
+              registrosArchivoSeguimiento={registrosArchivoSeguimiento}
               onUpdateEstado={handleUpdateEstado}
               onActualizarRapSeguimiento={handleActualizarRapSeguimiento}
               onSelectFicha={setSelectedFicha}
