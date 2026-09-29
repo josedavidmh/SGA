@@ -1,0 +1,2412 @@
+import React from 'react';
+import { 
+  Sidebar 
+} from './components/Sidebar';
+import { 
+  Header 
+} from './components/Header';
+import { 
+  DashboardView 
+} from './components/DashboardView';
+import { 
+  AvanceFichasView 
+} from './components/AvanceFichasView';
+import {
+  HorariosView
+} from './components/HorariosView';
+import {
+  ReportesView
+} from './components/ReportesView';
+import { 
+  SeguimientoView 
+} from './components/SeguimientoView';
+import { 
+  IngestaView 
+} from './components/IngestaView';
+import { 
+  CierresView 
+} from './components/CierresView';
+import { 
+  AdminView 
+} from './components/AdminView';
+import { 
+  InstructoresView 
+} from './components/InstructoresView';
+import { 
+  ProgramasView 
+} from './components/ProgramasView';
+import { 
+  CompetenciasView 
+} from './components/CompetenciasView';
+import { 
+  ParametrizacionesView 
+} from './components/ParametrizacionesView';
+import { 
+  LoginView 
+} from './components/LoginView';
+import { 
+  ModalCrearFicha 
+} from './components/ModalCrearFicha';
+import { 
+  ModalCrearInstructor 
+} from './components/ModalCrearInstructor';
+import { 
+  ModalEditarPrograma 
+} from './components/ModalEditarPrograma';
+import { 
+  ModalSupabaseGuia 
+} from './components/ModalSupabaseGuia';
+import { 
+  DescargarStandaloneModal 
+} from './components/DescargarStandaloneModal';
+import {
+  fetchFichasFromSupabase,
+  insertFichaInSupabase,
+  updateFichaInSupabase,
+  deleteFichaFromSupabase,
+  fetchInstructoresFromSupabase,
+  insertInstructorInSupabase,
+  updateInstructorInSupabase,
+  deleteInstructorFromSupabase,
+  fetchAmbientesFromSupabase,
+  insertOrUpdateAmbienteInSupabase,
+  deleteAmbienteFromSupabase,
+  logSistemaEnSupabase,
+  updateProgramaAndFichasInSupabase,
+  fetchActividadesSeguimientoFromSupabase,
+  upsertActividadSeguimientoInSupabase,
+  fetchRapsSeguimientoFromSupabase,
+  upsertRapSeguimientoInSupabase
+} from './services/supabaseService';
+import { 
+  caracterizarInstructoresDesdeJuicios,
+  caracterizarInstructoresDesdeHoras
+} from './services/instructorRecomendacionService';
+import { emparejarJuicioConCatalogo } from './services/cruceJuiciosService';
+import { 
+  generarEspecialidadesDesdeCompetencias 
+} from './services/planeacionPedagogicaService';
+import { 
+  User, 
+  UserRole, 
+  Ficha, 
+  Instructor, 
+  ProgramaFormacion,
+  ActividadSeguimiento, 
+  BloqueHorario, 
+  AuditoriaIngesta, 
+  AuditoriaSistema,
+  EstadoActividad,
+  Competencia,
+  ResultadoAprendizaje,
+  RegistroHorasEjecutadas,
+  ReporteJuiciosFicha,
+  EspecialidadTematica,
+  AmbienteAprendizaje,
+  RegistroArchivoSeguimiento,
+  RapSeguimiento,
+  EstadoRap,
+  HistorialInstructorRap,
+  TrimestreCalendario
+} from './types';
+import { 
+  CENTRO_SENA_DEFAULT, 
+  USUARIOS_INICIALES, 
+  FICHAS_INICIALES, 
+  INSTRUCTORES_INICIALES, 
+  PROGRAMAS_INICIALES,
+  ACTIVIDADES_SEGUIMIENTO_INICIALES, 
+  BLOQUES_HORARIOS_INICIALES, 
+  AUDITORIA_INGESTAS_INICIALES, 
+  AUDITORIA_SISTEMA_INICIAL
+} from './mockData';
+import { generarUuid } from './lib/id';
+
+export default function App() {
+  // Estado de Usuarios Registrados en el Sistema (con persistencia local)
+  const [usuarios, setUsuarios] = React.useState<User[]>(() => {
+    const saved = localStorage.getItem('sena_usuarios_registrados');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((u: User) => {
+            if (u.rol === 'ADMINISTRADOR') {
+              return { ...u, avatar: '/assets/alien_azul_admin.svg' };
+            }
+            return u;
+          });
+        }
+      } catch (e) {
+        console.error('Error parsing stored users', e);
+      }
+    }
+    return USUARIOS_INICIALES;
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_usuarios_registrados', JSON.stringify(usuarios));
+  }, [usuarios]);
+
+  // Estado de Autenticación y Usuario actual
+  const [isAuthenticated, setIsAuthenticated] = React.useState<boolean>(() => {
+    const savedId = localStorage.getItem('sena_session_user_id');
+    return !!savedId;
+  });
+
+  const [currentUser, setCurrentUser] = React.useState<User>(() => {
+    const savedId = localStorage.getItem('sena_session_user_id');
+    if (savedId) {
+      const userFound = usuarios.find(u => u.id === savedId);
+      if (userFound) {
+        if (userFound.rol === 'ADMINISTRADOR') {
+          return { ...userFound, avatar: '/assets/alien_azul_admin.svg' };
+        }
+        return userFound;
+      }
+    }
+    const admin = usuarios[0] || USUARIOS_INICIALES[0];
+    if (admin.rol === 'ADMINISTRADOR') {
+      return { ...admin, avatar: '/assets/alien_azul_admin.svg' };
+    }
+    return admin;
+  });
+
+  // Asegurar que el avatar del administrador siempre esté actualizado al extraterrestre azul
+  React.useEffect(() => {
+    setUsuarios(prev => prev.map(u => u.rol === 'ADMINISTRADOR' ? { ...u, avatar: '/assets/alien_azul_admin.svg' } : u));
+    setCurrentUser(prev => prev.rol === 'ADMINISTRADOR' ? { ...prev, avatar: '/assets/alien_azul_admin.svg' } : prev);
+  }, []);
+
+  const [activeTab, setActiveTab] = React.useState<string>('dashboard');
+
+  // Estado del Dominio de Datos
+  const [centro] = React.useState(CENTRO_SENA_DEFAULT);
+
+  // Fichas reales: inicia completamente vacía (0 fichas) para que el usuario las registre manualmente
+  const [fichas, setFichas] = React.useState<Ficha[]>(() => {
+    const isReset = localStorage.getItem('sena_reset_zero_fichas_v2');
+    if (isReset === 'true') {
+      const saved = localStorage.getItem('sena_fichas_reales');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (e) {
+          console.error('Error parsing stored fichas', e);
+        }
+      }
+      return [];
+    }
+    localStorage.setItem('sena_reset_zero_fichas_v2', 'true');
+    localStorage.setItem('sena_fichas_reales', JSON.stringify([]));
+    return [];
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_fichas_reales', JSON.stringify(fichas));
+  }, [fichas]);
+
+  // Ficha seleccionada (inicia en null: no se muestra ficha hasta que el usuario la seleccione)
+  const [selectedFicha, setSelectedFicha] = React.useState<Ficha | null>(null);
+
+  // Instructores reales (limpios para registro del usuario)
+  const [instructores, setInstructores] = React.useState<Instructor[]>(() => {
+    const saved = localStorage.getItem('sena_instructores_reales');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((p: any) => !p?.id?.startsWith?.('a0000000-0000-0000-0000-'));
+        }
+      } catch (e) {
+        console.error('Error parsing stored instructores', e);
+      }
+    }
+    return INSTRUCTORES_INICIALES;
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_instructores_reales', JSON.stringify(instructores));
+  }, [instructores]);
+
+  // Sincronizar selectedFicha únicamente si la ficha seleccionada fue eliminada
+  React.useEffect(() => {
+    if (selectedFicha && !fichas.some(f => f.id === selectedFicha.id)) {
+      setSelectedFicha(null);
+    }
+  }, [fichas, selectedFicha]);
+
+  // Programas de Formación (dejando exclusivamente el programa ADSO)
+  const [programas, setProgramas] = React.useState<ProgramaFormacion[]>(() => {
+    const saved = localStorage.getItem('sena_programas_formacion');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const soloAdso = parsed.filter(p => p.codigo === '228118' || p.nombre?.toLowerCase().includes('adso'));
+          if (soloAdso.length > 0) return soloAdso;
+        }
+      } catch (e) {
+        console.error('Error parsing stored programas', e);
+      }
+    }
+    return PROGRAMAS_INICIALES;
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_programas_formacion', JSON.stringify(programas));
+  }, [programas]);
+
+  // Garantizar que la base de fichas, instructores, competencias, planeaciones y juicios inicie 100% limpia para registrar datos reales
+  React.useEffect(() => {
+    const hasPurged = localStorage.getItem('sena_clean_start_real_data_v5');
+    if (!hasPurged) {
+      localStorage.setItem('sena_clean_start_real_data_v5', 'true');
+      setFichas([]);
+      setSelectedFicha(null);
+      setInstructores([]);
+      setHorarios([]);
+      setActividades([]);
+      setCompetencias([]);
+      setRaps([]);
+      setReportesJuicios({});
+      setRegistrosHorasEjecutadas([]);
+      localStorage.setItem('sena_fichas_reales', JSON.stringify([]));
+      localStorage.setItem('sena_instructores_reales', JSON.stringify([]));
+      localStorage.setItem('sena_competencias', JSON.stringify([]));
+      localStorage.setItem('sena_raps', JSON.stringify([]));
+      localStorage.setItem('sena_reportes_juicios', JSON.stringify({}));
+      localStorage.setItem('sena_horas_ejecutadas', JSON.stringify([]));
+      localStorage.setItem('sena_horarios', JSON.stringify([]));
+      localStorage.setItem('sena_actividades', JSON.stringify([]));
+    }
+    setProgramas(prev => {
+      const soloAdso = prev.filter(p => p.codigo === '228118' || p.nombre?.toLowerCase().includes('adso'));
+      return soloAdso.length > 0 ? soloAdso : PROGRAMAS_INICIALES;
+    });
+  }, []);
+
+  // Respaldo local (localStorage) además de Supabase: si Supabase no está configurado,
+  // o mientras carga la sincronización inicial, esto evita que el estado de las
+  // actividades (PENDIENTE/EN EJECUCION/CALIFICADO) se pierda al recargar la página,
+  // que era el comportamiento anterior (no se guardaba en ningún lado).
+  const [actividades, setActividades] = React.useState<ActividadSeguimiento[]>(() => {
+    const saved = localStorage.getItem('sena_actividades');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {
+        console.error('Error parsing stored actividades', e);
+      }
+    }
+    return ACTIVIDADES_SEGUIMIENTO_INICIALES;
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_actividades', JSON.stringify(actividades));
+  }, [actividades]);
+  // BUG REAL: 'horarios' se inicializaba SIEMPRE desde BLOQUES_HORARIOS_INICIALES
+  // (el arreglo semilla hardcodeado) y nunca se leía ni se escribía en localStorage,
+  // así que cada recarga de página / reinicio de 'npm run dev' perdía TODOS los
+  // bloques de horario reales creados en la sesión anterior y volvía a mostrar la
+  // semilla — exactamente el síntoma reportado ("reinicia todos los datos semilla").
+  // El efecto de "clean start" más arriba sí escribía la llave 'sena_horarios',
+  // pero nada la volvía a leer al montar. Se corrige con el mismo patrón de
+  // respaldo local que ya usan 'actividades' y 'rapsSeguimiento'.
+  const [horarios, setHorarios] = React.useState<BloqueHorario[]>(() => {
+    const saved = localStorage.getItem('sena_horarios');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error('Error parsing stored horarios', e);
+      }
+    }
+    return BLOQUES_HORARIOS_INICIALES;
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_horarios', JSON.stringify(horarios));
+  }, [horarios]);
+
+  const [auditoriaIngestas, setAuditoriaIngestas] = React.useState<AuditoriaIngesta[]>(() => {
+    const saved = localStorage.getItem('sena_auditoria_ingestas');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error('Error parsing stored auditoriaIngestas', e);
+      }
+    }
+    return AUDITORIA_INGESTAS_INICIALES;
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_auditoria_ingestas', JSON.stringify(auditoriaIngestas));
+  }, [auditoriaIngestas]);
+
+  const [auditoriaSistema, setAuditoriaSistema] = React.useState<AuditoriaSistema[]>(() => {
+    const saved = localStorage.getItem('sena_auditoria_sistema');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error('Error parsing stored auditoriaSistema', e);
+      }
+    }
+    return AUDITORIA_SISTEMA_INICIAL;
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_auditoria_sistema', JSON.stringify(auditoriaSistema));
+  }, [auditoriaSistema]);
+
+  // Competencias y RAPs (inician vacíos, listos para la carga de Planeación Pedagógica del usuario)
+  const [competencias, setCompetencias] = React.useState<Competencia[]>(() => {
+    const isReset = localStorage.getItem('sena_reset_zero_competencias_v1');
+    if (isReset === 'true') {
+      const saved = localStorage.getItem('sena_competencias');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (e) {
+          console.error('Error parsing stored competencias', e);
+        }
+      }
+      return [];
+    }
+    localStorage.setItem('sena_reset_zero_competencias_v1', 'true');
+    localStorage.setItem('sena_competencias', JSON.stringify([]));
+    return [];
+  });
+
+  const [raps, setRaps] = React.useState<ResultadoAprendizaje[]>(() => {
+    const isReset = localStorage.getItem('sena_reset_zero_competencias_v1');
+    if (isReset === 'true') {
+      const saved = localStorage.getItem('sena_raps');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (e) {
+          console.error('Error parsing stored raps', e);
+        }
+      }
+      return [];
+    }
+    localStorage.setItem('sena_raps', JSON.stringify([]));
+    return [];
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_competencias', JSON.stringify(competencias));
+  }, [competencias]);
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_raps', JSON.stringify(raps));
+  }, [raps]);
+
+  // Registros granulares del Archivo de Seguimiento (para futuros cruces con horarios, horas ejecutadas y juicios)
+  const [registrosArchivoSeguimiento, setRegistrosArchivoSeguimiento] = React.useState<RegistroArchivoSeguimiento[]>(() => {
+    const saved = localStorage.getItem('sena_archivo_seguimiento_registros');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error('Error parsing stored archivo de seguimiento registros', e);
+      }
+    }
+    return [];
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_archivo_seguimiento_registros', JSON.stringify(registrosArchivoSeguimiento));
+  }, [registrosArchivoSeguimiento]);
+
+  // Reportes de Horas Ejecutadas por Instructor y Competencia.
+  // IMPORTANTE: a propósito NO se persiste en localStorage. Este archivo se
+  // vuelve a cargar cada vez que SofiaPlus se actualiza (es progresivo, no
+  // acumulativo), así que solo se usa para comparar y extraer datos durante
+  // la sesión — lo que debe sobrevivir de verdad queda en registrosHorasFicha
+  // ya agregado, no en el crudo del archivo.
+  const [registrosHorasEjecutadas, setRegistrosHorasEjecutadas] = React.useState<RegistroHorasEjecutadas[]>([]);
+
+  // Reportes de Juicios Evaluativos SofiaPlus por Ficha.
+  // IMPORTANTE: tampoco se persiste en localStorage por la misma razón — el
+  // archivo de Juicios se vuelve a cargar cada vez que se actualiza en
+  // SofiaPlus. Lo que sí persiste es lo que esta pasada EXTRAE de él:
+  // estados y asignaciones en rapsSeguimiento, y retención/deserción de la
+  // ficha. Se conserva en memoria durante la sesión únicamente para mostrar
+  // el detalle del último cargue (ver Avance de Fichas).
+  const [reportesJuicios, setReportesJuicios] = React.useState<Record<string, ReporteJuiciosFicha>>({});
+
+  // Seguimiento por RAP individual (instructor asignado + estado por ficha)
+  const [rapsSeguimiento, setRapsSeguimiento] = React.useState<RapSeguimiento[]>(() => {
+    const saved = localStorage.getItem('sena_raps_seguimiento');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error('Error parsing stored raps seguimiento', e);
+      }
+    }
+    return [];
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_raps_seguimiento', JSON.stringify(rapsSeguimiento));
+  }, [rapsSeguimiento]);
+
+  // Especialidades Temáticas (Concisa y editable, alimentada desde Planeación Pedagógica)
+  const [especialidades, setEspecialidades] = React.useState<EspecialidadTematica[]>(() => {
+    const saved = localStorage.getItem('sena_especialidades_tematicas');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {
+        console.error('Error parsing stored especialidades', e);
+      }
+    }
+    return [
+      {
+        id: 'esp_prog_soft',
+        nombre: 'Programación de Software',
+        area: 'Técnica',
+        colorTag: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+        descripcion: 'Desarrollo backend, frontend, algoritmos y codificación',
+        competenciasAsociadasCodigos: ['220501096', '38368', '38376'],
+        origen: 'MANUAL',
+        estado: 'ACTIVA'
+      },
+      {
+        id: 'esp_bd',
+        nombre: 'Bases de Datos',
+        area: 'Técnica',
+        colorTag: 'bg-violet-100 text-violet-800 border-violet-200',
+        descripcion: 'Diseño, modelamiento y administración de bases de datos SQL y NoSQL',
+        competenciasAsociadasCodigos: ['220501093', '38362'],
+        origen: 'MANUAL',
+        estado: 'ACTIVA'
+      },
+      {
+        id: 'esp_ingles',
+        nombre: 'Bilingüismo e Inglés',
+        area: 'Clave',
+        colorTag: 'bg-blue-100 text-blue-800 border-blue-200',
+        descripcion: 'Comunicación en idioma inglés laboral y técnico',
+        competenciasAsociadasCodigos: ['240202501', '37714'],
+        origen: 'MANUAL',
+        estado: 'ACTIVA'
+      },
+      {
+        id: 'esp_etica',
+        nombre: 'Ética y Convivencia',
+        area: 'Transversal',
+        colorTag: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+        descripcion: 'Cultura de paz, ética y relaciones interpersonales',
+        competenciasAsociadasCodigos: ['240201524', '36180'],
+        origen: 'MANUAL',
+        estado: 'ACTIVA'
+      }
+    ];
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_especialidades_tematicas', JSON.stringify(especialidades));
+  }, [especialidades]);
+
+  // Ambientes de Formación Física / Virtual
+  const [ambientes, setAmbientes] = React.useState<AmbienteAprendizaje[]>(() => {
+    const saved = localStorage.getItem('sena_ambientes_aprendizaje');
+    if (saved !== null) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error('Error parsing stored ambientes', e);
+      }
+    }
+    return [];
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_ambientes_aprendizaje', JSON.stringify(ambientes));
+  }, [ambientes]);
+
+  // Calendario institucional de trimestres (fechas de corte oficiales),
+  // usado para elegir/mostrar el rango de un trimestre al descargar el
+  // Formato de Eventos, independiente de lo que ya haya cargado en Horarios.
+  const [trimestresCalendario, setTrimestresCalendario] = React.useState<TrimestreCalendario[]>(() => {
+    const saved = localStorage.getItem('sena_trimestres_calendario');
+    if (saved !== null) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error('Error parsing stored trimestres calendario', e);
+      }
+    }
+    return [];
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('sena_trimestres_calendario', JSON.stringify(trimestresCalendario));
+  }, [trimestresCalendario]);
+
+  const handleGuardarTrimestreCalendario = (t: TrimestreCalendario) => {
+    setTrimestresCalendario(prev => {
+      const idx = prev.findIndex(x => x.id === t.id);
+      if (idx >= 0) {
+        const copia = [...prev];
+        copia[idx] = t;
+        return copia;
+      }
+      return [...prev, t];
+    });
+  };
+
+  const handleEliminarTrimestreCalendario = (id: string) => {
+    setTrimestresCalendario(prev => prev.filter(t => t.id !== id));
+  };
+
+  const [selectedProgramaForCompetencias, setSelectedProgramaForCompetencias] = React.useState<string>('228118');
+
+  // Modales de Creación Manual, Edición de Programas y Supabase
+  const [isModalFichaOpen, setIsModalFichaOpen] = React.useState<boolean>(false);
+  const [fichaParaEditar, setFichaParaEditar] = React.useState<Ficha | null>(null);
+  const [isModalInstructorOpen, setIsModalInstructorOpen] = React.useState<boolean>(false);
+  const [instructorParaEditar, setInstructorParaEditar] = React.useState<Instructor | null>(null);
+  const [isModalProgramaOpen, setIsModalProgramaOpen] = React.useState<boolean>(false);
+  const [programaParaEditar, setProgramaParaEditar] = React.useState<ProgramaFormacion | null>(null);
+  const [isModalSupabaseOpen, setIsModalSupabaseOpen] = React.useState<boolean>(false);
+  const [isModalStandaloneOpen, setIsModalStandaloneOpen] = React.useState<boolean>(false);
+
+  // Estado de Menú Lateral Retráctil (Desktop) y Menú Drawer (Móvil)
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState<boolean>(() => {
+    return localStorage.getItem('sena_sidebar_collapsed') === 'true';
+  });
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState<boolean>(false);
+
+  const toggleSidebarCollapse = () => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('sena_sidebar_collapsed', String(next));
+      return next;
+    });
+  };
+
+  // Sincronización en vivo desde PostgreSQL / Supabase al cargar la app
+  const [isSyncingSupabase, setIsSyncingSupabase] = React.useState<boolean>(false);
+
+  const sincronizarDatosDesdeSupabase = React.useCallback(async () => {
+    setIsSyncingSupabase(true);
+    try {
+      // 1. Sincronización de Instructores (primero, para poder resolver el nombre/email
+      // del instructor líder de cada ficha al sincronizarlas justo debajo).
+      const dbInstructores = await fetchInstructoresFromSupabase();
+      if (dbInstructores && dbInstructores.length > 0) {
+        setInstructores(prev => {
+          const prevLimpio = prev.filter(p => !p.id.startsWith('a0000000-0000-0000-0000-'));
+          const merged = [...prevLimpio];
+          for (const dbInst of dbInstructores) {
+            if (dbInst.id.startsWith('a0000000-0000-0000-0000-')) continue;
+            const index = merged.findIndex(
+              m => m.id === dbInst.id ||
+                   (m.documento && dbInst.documento && String(m.documento).trim() === String(dbInst.documento).trim()) ||
+                   (m.email && dbInst.email && m.email.trim().toLowerCase() === dbInst.email.trim().toLowerCase())
+            );
+
+            if (index >= 0) {
+              merged[index] = {
+                ...merged[index],
+                ...dbInst,
+                id: dbInst.id,
+                horasSemanalesAsignadas: merged[index].horasSemanalesAsignadas || dbInst.horasSemanalesAsignadas
+              };
+            } else {
+              merged.push(dbInst);
+            }
+          }
+          return merged;
+        });
+      } else {
+        setInstructores(prev => prev.filter(p => !p.id.startsWith('a0000000-0000-0000-0000-')));
+      }
+
+      // 2. Sincronización de Fichas
+      // fetchFichasFromSupabase() no conoce el nombre/email del instructor líder (la tabla
+      // fichas solo guarda instructor_lider_id), así que se resuelve aquí con dbInstructores.
+      const dbFichas = await fetchFichasFromSupabase();
+      if (dbFichas && dbFichas.length > 0) {
+        const instructorLookup = new Map<string, { nombre: string; email: string }>();
+        dbInstructores.forEach(i => instructorLookup.set(i.id, { nombre: i.nombreCompleto, email: i.email }));
+
+        setFichas(prev => {
+          const merged = [...prev];
+          for (const dbFicha of dbFichas) {
+            const index = merged.findIndex(f => f.id === dbFicha.id || f.numero_ficha === dbFicha.numero_ficha);
+            const infoLider = dbFicha.instructorLiderId ? instructorLookup.get(dbFicha.instructorLiderId) : undefined;
+            const fichaResuelta: Ficha = {
+              ...dbFicha,
+              instructorLiderNombre: infoLider?.nombre || (index >= 0 ? merged[index].instructorLiderNombre : dbFicha.instructorLiderNombre),
+              instructorLiderEmail: infoLider?.email || (index >= 0 ? merged[index].instructorLiderEmail : dbFicha.instructorLiderEmail)
+            };
+            if (index >= 0) {
+              merged[index] = { ...merged[index], ...fichaResuelta, id: dbFicha.id };
+            } else {
+              merged.push(fichaResuelta);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 3. Sincronización de Ambientes (si existe en Supabase)
+      const dbAmbientes = await fetchAmbientesFromSupabase();
+      if (dbAmbientes && dbAmbientes.length > 0) {
+        setAmbientes(dbAmbientes);
+      }
+
+      // 4. Sincronización de Actividades de Seguimiento (Matriz GPFI-F-134)
+      const dbActividades = await fetchActividadesSeguimientoFromSupabase();
+      if (dbActividades && dbActividades.length > 0) {
+        setActividades(prev => {
+          const merged = [...prev];
+          for (const dbAct of dbActividades) {
+            const index = merged.findIndex(a => a.id === dbAct.id);
+            if (index >= 0) {
+              merged[index] = dbAct;
+            } else {
+              merged.push(dbAct);
+            }
+          }
+          return merged;
+        });
+      }
+
+      // 5. Sincronización de Seguimiento por RAP individual (instructor asignado + estado)
+      const dbRapsSeguimiento = await fetchRapsSeguimientoFromSupabase();
+      if (dbRapsSeguimiento && dbRapsSeguimiento.length > 0) {
+        setRapsSeguimiento(prev => {
+          const merged = [...prev];
+          for (const dbSeg of dbRapsSeguimiento) {
+            const index = merged.findIndex(s => s.id === dbSeg.id || (s.fichaId === dbSeg.fichaId && s.rapCodigo === dbSeg.rapCodigo));
+            if (index >= 0) {
+              merged[index] = dbSeg;
+            } else {
+              merged.push(dbSeg);
+            }
+          }
+          return merged;
+        });
+      }
+    } catch (err) {
+      console.error('Error al sincronizar datos desde Supabase:', err);
+    } finally {
+      setIsSyncingSupabase(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    sincronizarDatosDesdeSupabase();
+  }, [sincronizarDatosDesdeSupabase]);
+
+  // Registro de Auditoría
+  const registrarLog = (accion: string, modulo: string, detalles: string) => {
+    const nuevoLog: AuditoriaSistema = {
+      id: `aud_${Date.now()}`,
+      fechaHora: new Date().toISOString().replace('T', ' ').substring(0, 19),
+      usuarioId: currentUser.id,
+      usuarioNombre: currentUser.nombre_completo,
+      rol: currentUser.rol,
+      accion,
+      modulo,
+      ip: '192.168.1.55',
+      detalles
+    };
+    setAuditoriaSistema(prev => [nuevoLog, ...prev]);
+    logSistemaEnSupabase(accion, modulo, detalles, currentUser.nombre_completo);
+  };
+
+  // Manejo de Inicio y Cierre de Sesión
+  const handleLoginSuccess = (user: User) => {
+    setCurrentUser(user);
+    setIsAuthenticated(true);
+    if (user.rol === 'INSTRUCTOR_LIDER') {
+      const fichaLider = fichas.find(f => f.id === user.fichaAsignadaId || f.instructorLiderId === user.id || f.instructorLiderEmail === user.correo) || fichas[0] || null;
+      if (fichaLider) setSelectedFicha(fichaLider);
+    }
+    setActiveTab('dashboard');
+    registrarLog('INICIO_SESION_EXITOSO', 'Autenticación y Seguridad', `Inicio de sesión exitoso: ${user.nombre_completo} (${user.rol}) - ${user.correo}`);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('sena_session_user_id');
+    setIsAuthenticated(false);
+    registrarLog('CIERRE_SESION', 'Autenticación y Seguridad', `Cierre de sesión de ${currentUser.nombre_completo}`);
+  };
+
+  // Cambio de Rol (RBAC Switcher)
+  const handleSwitchUser = (rol: UserRole) => {
+    const user = usuarios.find(u => u.rol === rol);
+    if (user) {
+      setCurrentUser(user);
+      localStorage.setItem('sena_session_user_id', user.id);
+      if (rol !== 'ADMINISTRADOR' && (activeTab === 'programas' || activeTab === 'competencias' || activeTab === 'admin')) {
+        setActiveTab('dashboard');
+      }
+      if (rol === 'AUXILIAR') {
+        if (activeTab === 'cierres' || activeTab === 'admin' || activeTab === 'instructores') {
+          setActiveTab('dashboard');
+        }
+      } else if (rol === 'INSTRUCTOR_LIDER') {
+        const fichaLider = fichas.find(f => f.id === user.fichaAsignadaId || f.instructorLiderId === user.id) || fichas[0] || null;
+        if (fichaLider) setSelectedFicha(fichaLider);
+        if (activeTab === 'admin' || activeTab === 'cierres' || activeTab === 'instructores') {
+          setActiveTab('dashboard');
+        }
+      }
+      registrarLog('CAMBIO_ROL_RBAC', 'Autenticación', `Inicio de sesión como ${user.nombre_completo} (${user.rol})`);
+    }
+  };
+
+  // Gestión de Usuarios por el Administrador
+  const handleCrearUsuario = (nuevoUser: User) => {
+    setUsuarios(prev => [...prev, nuevoUser]);
+    registrarLog('CREAR_USUARIO', 'Gestión de Usuarios', `Usuario ${nuevoUser.nombre_completo} (${nuevoUser.rol}) creado.`);
+    alert(`¡Usuario ${nuevoUser.nombre_completo} creado con éxito!\nCorreo: ${nuevoUser.correo}\nRol: ${nuevoUser.rol}`);
+  };
+
+  const handleEliminarUsuario = (usuarioId: string) => {
+    const userTarget = usuarios.find(u => u.id === usuarioId);
+    if (!userTarget) return;
+    if (confirm(`¿Confirma que desea eliminar la cuenta de ${userTarget.nombre_completo}?`)) {
+      setUsuarios(prev => prev.filter(u => u.id !== usuarioId));
+      registrarLog('ELIMINAR_USUARIO', 'Gestión de Usuarios', `Usuario ${userTarget.nombre_completo} eliminado.`);
+    }
+  };
+
+  // Creación Manual de Ficha
+  const handleCrearFicha = (nuevaFicha: Ficha) => {
+    setFichas(prev => [nuevaFicha, ...prev]);
+    setSelectedFicha(nuevaFicha);
+    insertFichaInSupabase(nuevaFicha).catch(err => {
+      console.error('Error al insertar ficha en Supabase:', err);
+    });
+
+    // Generar automáticamente las actividades iniciales pedagógicas del plan para esta nueva ficha
+    const actividadesNuevas: ActividadSeguimiento[] = [
+      {
+        id: generarUuid(),
+        fichaId: nuevaFicha.id,
+        fase: 'Fase 1: Análisis',
+        competenciaCodigo: '220501092',
+        competenciaDenominacion: 'Levantamiento de requisitos del software según estándares SENA',
+        rapCodigo: 'RAP 01',
+        rapDenominacion: 'Determinar los requisitos funcionales mediante entrevistas y diagramas',
+        actividadAprendizaje: 'Diseño del documento de especificación de requisitos de software (SRS IEEE 830)',
+        evidenciaCodigo: 'GA1-220501092-AA1-EV01',
+        horasDirectas: 40,
+        horasIndependientes: 10,
+        instructorId: nuevaFicha.instructorLiderId,
+        instructorNombre: nuevaFicha.instructorLiderNombre,
+        estado: 'EN EJECUCION',
+        fechaUltimaActualizacion: new Date().toLocaleDateString()
+      },
+      {
+        id: generarUuid(),
+        fichaId: nuevaFicha.id,
+        fase: 'Fase 2: Planeación',
+        competenciaCodigo: '220501093',
+        competenciaDenominacion: 'Modelado y diseño de bases de datos relacionales',
+        rapCodigo: 'RAP 02',
+        rapDenominacion: 'Elaborar el modelo conceptual y lógico de base de datos relacional',
+        actividadAprendizaje: 'Diagrama Entidad-Relación y script DDL de normalización 3FN',
+        evidenciaCodigo: 'GA2-220501093-AA1-EV02',
+        horasDirectas: 48,
+        horasIndependientes: 12,
+        instructorId: nuevaFicha.instructorLiderId,
+        instructorNombre: nuevaFicha.instructorLiderNombre,
+        estado: 'PENDIENTE',
+        fechaUltimaActualizacion: new Date().toLocaleDateString()
+      }
+    ];
+
+    setActividades(prev => [...actividadesNuevas, ...prev]);
+    actividadesNuevas.forEach(act => {
+      upsertActividadSeguimientoInSupabase(act).catch(err => {
+        console.error('Error al insertar actividad de seguimiento en Supabase:', err);
+      });
+    });
+
+    registrarLog(
+      'CREAR_FICHA_MANUAL',
+      'Gestión de Fichas',
+      `Ficha ${nuevaFicha.numero_ficha} creada manualmente (${nuevaFicha.programaNombre}). Instructor Líder: ${nuevaFicha.instructorLiderNombre}`
+    );
+
+    alert(`¡Ficha ${nuevaFicha.numero_ficha} registrada con éxito!\nHa sido seleccionada como la ficha activa en el sistema.`);
+  };
+
+  // =====================================================================
+  // GESTIÓN Y EDICIÓN DE INSTRUCTORES
+  // =====================================================================
+
+  const handleOpenCrearInstructor = () => {
+    setInstructorParaEditar(null);
+    setIsModalInstructorOpen(true);
+  };
+
+  const handleOpenEditarInstructor = (inst: Instructor) => {
+    setInstructorParaEditar(inst);
+    setIsModalInstructorOpen(true);
+  };
+
+  // Creación y Edición de Instructor
+  const handleGuardarInstructor = (instructorActualizado: Instructor, crearCuentaUsuario: boolean = true, claveUsuario: string = 'Sena2026*') => {
+    const esEdicion = instructores.some(i => i.id === instructorActualizado.id);
+
+    if (esEdicion) {
+      setInstructores(prev => prev.map(i => i.id === instructorActualizado.id ? instructorActualizado : i));
+      updateInstructorInSupabase(instructorActualizado.id, instructorActualizado).catch(err => {
+        console.error('Error al actualizar instructor en Supabase:', err);
+      });
+
+      // Sincronizar en cascada si cambiaron nombres o correos
+      setFichas(prev => prev.map(f => {
+        if (f.instructorLiderId === instructorActualizado.id) {
+          return {
+            ...f,
+            instructorLiderNombre: instructorActualizado.nombreCompleto,
+            instructorLiderEmail: instructorActualizado.email
+          };
+        }
+        return f;
+      }));
+
+      setHorarios(prev => prev.map(h => {
+        if (h.instructorId === instructorActualizado.id) {
+          return {
+            ...h,
+            instructorNombre: instructorActualizado.nombreCompleto
+          };
+        }
+        return h;
+      }));
+
+      setUsuarios(prev => prev.map(u => {
+        if (u.id === `usr_${instructorActualizado.id}` || (instructorParaEditar && u.correo.toLowerCase() === instructorParaEditar.email.toLowerCase())) {
+          return {
+            ...u,
+            correo: instructorActualizado.email.toLowerCase(),
+            nombre_completo: instructorActualizado.nombreCompleto,
+            cargo: `Instructor Líder - ${instructorActualizado.especialidad}`,
+            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(instructorActualizado.nombreCompleto)}&background=0D631B&color=fff`
+          };
+        }
+        return u;
+      }));
+
+      registrarLog(
+        'EDICION_INSTRUCTOR',
+        'Gestión de Instructores',
+        `Instructor ${instructorActualizado.nombreCompleto} (ID: ${instructorActualizado.documento}, ${instructorActualizado.especialidad}) actualizado.`
+      );
+    } else {
+      setInstructores(prev => [instructorActualizado, ...prev]);
+      insertInstructorInSupabase(instructorActualizado).catch(err => {
+        console.error('Error al insertar instructor en Supabase:', err);
+      });
+
+      // Crear cuenta de usuario si se solicitó
+      if (crearCuentaUsuario) {
+        const nuevoUser: User = {
+          id: `usr_${instructorActualizado.id}`,
+          correo: instructorActualizado.email.toLowerCase(),
+          clave: claveUsuario || 'Sena2026*',
+          nombre_completo: instructorActualizado.nombreCompleto,
+          rol: 'INSTRUCTOR_LIDER',
+          cargo: `Instructor Líder - ${instructorActualizado.especialidad}`,
+          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(instructorActualizado.nombreCompleto)}&background=0D631B&color=fff`
+        };
+        setUsuarios(prev => {
+          if (!prev.some(u => u.correo.toLowerCase() === nuevoUser.correo.toLowerCase())) {
+            return [...prev, nuevoUser];
+          }
+          return prev;
+        });
+      }
+
+      registrarLog(
+        'CREAR_INSTRUCTOR_MANUAL',
+        'Gestión de Instructores',
+        `Instructor ${instructorActualizado.nombreCompleto} (${instructorActualizado.especialidad}) registrado en planta de instructores${crearCuentaUsuario ? ' con usuario de acceso' : ''}.`
+      );
+
+      alert(`¡Instructor ${instructorActualizado.nombreCompleto} registrado con éxito!${crearCuentaUsuario ? `\nUsuario de acceso creado: ${instructorActualizado.email}\nClave: ${claveUsuario || 'Sena2026*'}` : ''}`);
+    }
+  };
+
+  const handleToggleEstadoInstructor = (id: string) => {
+    setInstructores(prev => prev.map(i => {
+      if (i.id === id) {
+        const nuevoEstado = i.estado === 'ACTIVO' ? 'INACTIVO' : 'ACTIVO';
+        updateInstructorInSupabase(id, { estado: nuevoEstado }).catch(err => {
+          console.error('Error al actualizar estado en Supabase:', err);
+        });
+        return { ...i, estado: nuevoEstado };
+      }
+      return i;
+    }));
+  };
+
+  const handleEliminarInstructor = (id: string) => {
+    const inst = instructores.find(i => i.id === id);
+    if (!inst) return;
+
+    // Validación estricta de dependencias relacionales
+    const fichasLider = fichas.filter(f => 
+      f.instructorLiderId === inst.id || 
+      (f.instructorLiderEmail && f.instructorLiderEmail.toLowerCase() === inst.email.toLowerCase()) ||
+      (f.instructorLiderNombre && f.instructorLiderNombre.toLowerCase() === inst.nombreCompleto.toLowerCase())
+    );
+    const bloques = horarios.filter(h => 
+      h.instructorId === inst.id || 
+      (h.instructorNombre && h.instructorNombre.toLowerCase() === inst.nombreCompleto.toLowerCase())
+    );
+    const horasReg = registrosHorasEjecutadas.filter(r => 
+      (r.instructorDocumento && r.instructorDocumento === inst.documento) ||
+      (r.instructorNombre && r.instructorNombre.toLowerCase() === inst.nombreCompleto.toLowerCase())
+    );
+
+    if (fichasLider.length > 0 || bloques.length > 0 || horasReg.length > 0) {
+      alert(`No se puede eliminar a ${inst.nombreCompleto} porque cuenta con datos vinculados en el sistema.`);
+      return;
+    }
+
+    setInstructores(prev => prev.filter(i => i.id !== id));
+    // Eliminar cuenta de usuario vinculada si existe
+    setUsuarios(prev => prev.filter(u => u.correo.toLowerCase() !== inst.email.toLowerCase()));
+
+    // Eliminar permanentemente de Supabase
+    deleteInstructorFromSupabase(id).catch(err => {
+      console.error('Error al eliminar instructor de Supabase:', err);
+    });
+
+    registrarLog(
+      'ELIMINAR_INSTRUCTOR',
+      'Gestión de Instructores',
+      `Instructor ${inst.nombreCompleto} (C.C. ${inst.documento}) eliminado del sistema.`
+    );
+  };
+
+  // =====================================================================
+  // GESTIÓN DE PARAMETRIZACIONES Y TABLAS MAESTRAS
+  // =====================================================================
+
+  const handleGuardarEspecialidad = (especialidad: EspecialidadTematica) => {
+    setEspecialidades(prev => {
+      const exists = prev.some(e => e.id === especialidad.id);
+      if (exists) {
+        return prev.map(e => e.id === especialidad.id ? especialidad : e);
+      }
+      return [especialidad, ...prev];
+    });
+
+    registrarLog(
+      'GUARDAR_ESPECIALIDAD_TEMATICA',
+      'Parametrizaciones',
+      `Especialidad temática "${especialidad.nombre}" (${especialidad.area}) guardada.`
+    );
+  };
+
+  const handleEliminarEspecialidad = (id: string) => {
+    const target = especialidades.find(e => e.id === id);
+    setEspecialidades(prev => prev.filter(e => e.id !== id));
+    if (target) {
+      registrarLog(
+        'ELIMINAR_ESPECIALIDAD_TEMATICA',
+        'Parametrizaciones',
+        `Especialidad temática "${target.nombre}" eliminada.`
+      );
+    }
+  };
+
+  const handleAutoGenerarEspecialidades = () => {
+    if (competencias.length === 0) {
+      alert('No hay competencias curriculares cargadas en el sistema.\nCarga primero una planeación pedagógica (GPFI-F-134) en el módulo de Ingesta o Competencias.');
+      return;
+    }
+
+    const generadas = generarEspecialidadesDesdeCompetencias(competencias, especialidades);
+    setEspecialidades(generadas);
+
+    registrarLog(
+      'AUTOGENERAR_ESPECIALIDADES_TEMATICAS',
+      'Parametrizaciones',
+      `Auto-generadas ${generadas.length} especialidades temáticas a partir de ${competencias.length} competencias.`
+    );
+
+    alert(`✓ ¡Se estructuraron exitosamente ${generadas.length} especialidades temáticas concisas a partir de las competencias de la planeación pedagógica!`);
+  };
+
+  const handleGuardarAmbiente = (ambiente: AmbienteAprendizaje) => {
+    setAmbientes(prev => {
+      const exists = prev.some(a => a.id === ambiente.id);
+      if (exists) {
+        return prev.map(a => a.id === ambiente.id ? ambiente : a);
+      }
+      return [ambiente, ...prev];
+    });
+
+    insertOrUpdateAmbienteInSupabase(ambiente).catch(err => {
+      console.warn('Persistencia en Supabase no disponible para ambientes:', err);
+    });
+
+    registrarLog(
+      'GUARDAR_AMBIENTE_FORMACION',
+      'Parametrizaciones',
+      `Ambiente "${ambiente.nombre}" (${ambiente.tipo}) guardado.`
+    );
+  };
+
+  const handleEliminarAmbiente = (id: string) => {
+    const target = ambientes.find(a => a.id === id);
+    setAmbientes(prev => prev.filter(a => a.id !== id));
+    deleteAmbienteFromSupabase(id).catch(err => {
+      console.warn('Persistencia en Supabase no disponible para ambientes:', err);
+    });
+    if (target) {
+      registrarLog(
+        'ELIMINAR_AMBIENTE_FORMACION',
+        'Parametrizaciones',
+        `Ambiente de formación "${target.nombre}" eliminado.`
+      );
+    }
+  };
+
+  // =====================================================================
+  // GESTIÓN Y EDICIÓN DE PROGRAMAS DE FORMACIÓN
+  // =====================================================================
+
+  const handleOpenEditarPrograma = (programa: ProgramaFormacion) => {
+    setProgramaParaEditar(programa);
+    setIsModalProgramaOpen(true);
+  };
+
+  const handleOpenCrearPrograma = () => {
+    setProgramaParaEditar(null);
+    setIsModalProgramaOpen(true);
+  };
+
+  const handleOpenEditarProgramaFichaActiva = () => {
+    if (!selectedFicha) {
+      handleOpenCrearPrograma();
+      return;
+    }
+    const progExistente = programas.find(p => p.codigo === selectedFicha.programaCodigo);
+    if (progExistente) {
+      setProgramaParaEditar(progExistente);
+    } else {
+      const nuevoProg: ProgramaFormacion = {
+        id: `prog_${selectedFicha.programaCodigo}`,
+        codigo: selectedFicha.programaCodigo,
+        nombre: selectedFicha.programaNombre,
+        version: selectedFicha.version,
+        nivelFormacion: selectedFicha.nivelFormacion as any,
+        lineaTecnologica: 'Tecnologías de la Información y las Comunicaciones',
+        redConocimiento: 'Informática, Diseño y Desarrollo de Software',
+        duracionLectivaHoras: selectedFicha.horasDirectasTotales || 3120,
+        duracionProductivaHoras: selectedFicha.horasIndependientesTotales || 864,
+        duracionTotalHoras: (selectedFicha.horasDirectasTotales || 3120) + (selectedFicha.horasIndependientesTotales || 864),
+        estado: 'ACTIVO',
+        descripcion: 'Programa de formación integral en el Centro Biotecnológico del Caribe.'
+      };
+      setProgramaParaEditar(nuevoProg);
+    }
+    setIsModalProgramaOpen(true);
+  };
+
+  const handleGuardarPrograma = async (programaActualizado: ProgramaFormacion, oldCodigo: string) => {
+    // 1. Actualizar el catálogo de programas en memoria
+    setProgramas(prev => {
+      const exists = prev.some(p => p.id === programaActualizado.id || p.codigo === oldCodigo);
+      if (exists) {
+        return prev.map(p => (p.id === programaActualizado.id || p.codigo === oldCodigo) ? programaActualizado : p);
+      }
+      return [programaActualizado, ...prev];
+    });
+
+    // 2. Sincronizar en cascada todas las fichas vinculadas al programa
+    setFichas(prev => prev.map(f => {
+      if (f.programaCodigo === oldCodigo || f.programaCodigo === programaActualizado.codigo) {
+        return {
+          ...f,
+          programaCodigo: programaActualizado.codigo,
+          programaNombre: programaActualizado.nombre,
+          version: programaActualizado.version,
+          nivelFormacion: programaActualizado.nivelFormacion,
+          horasDirectasTotales: programaActualizado.duracionLectivaHoras,
+          horasIndependientesTotales: programaActualizado.duracionProductivaHoras
+        };
+      }
+      return f;
+    }));
+
+    // 3. Actualizar la ficha seleccionada en el estado si coincide
+    setSelectedFicha(prev => {
+      if (!prev) return null;
+      if (prev.programaCodigo === oldCodigo || prev.programaCodigo === programaActualizado.codigo) {
+        return {
+          ...prev,
+          programaCodigo: programaActualizado.codigo,
+          programaNombre: programaActualizado.nombre,
+          version: programaActualizado.version,
+          nivelFormacion: programaActualizado.nivelFormacion,
+          horasDirectasTotales: programaActualizado.duracionLectivaHoras,
+          horasIndependientesTotales: programaActualizado.duracionProductivaHoras
+        };
+      }
+      return prev;
+    });
+
+    // 4. Registro en el libro de auditoría
+    registrarLog(
+      'EDICION_PROGRAMA_CURRICULAR',
+      'Catálogo de Programas',
+      `Programa ${programaActualizado.codigo} - ${programaActualizado.nombre} (v${programaActualizado.version}) guardado/actualizado.`
+    );
+
+    // 5. Intentar persistencia en Supabase (si está configurado)
+    if (oldCodigo) {
+      const res = await updateProgramaAndFichasInSupabase(oldCodigo, programaActualizado);
+      if (!res.success && res.isRlsError) {
+        throw new Error(res.error || 'Row Level Security activo en Supabase');
+      }
+    }
+  };
+
+  const handleEliminarPrograma = (programaId: string) => {
+    const target = programas.find(p => p.id === programaId);
+    if (!target) return;
+    if (confirm(`¿Confirma que desea eliminar el programa "${target.codigo} - ${target.nombre}" y sus fichas asociadas?`)) {
+      setProgramas(prev => prev.filter(p => p.id !== programaId));
+      setFichas(prev => prev.filter(f => f.programaCodigo !== target.codigo));
+      setCompetencias(prev => prev.filter(c => c.programaCodigo !== target.codigo));
+      setRaps(prev => prev.filter(r => r.programaCodigo !== target.codigo));
+      if (selectedFicha?.programaCodigo === target.codigo) {
+        setSelectedFicha(null);
+      }
+      registrarLog(
+        'ELIMINAR_PROGRAMA_CURRICULAR',
+        'Catálogo de Programas',
+        `Programa ${target.codigo} (${target.nombre}) eliminado por el usuario.`
+      );
+    }
+  };
+
+  const handleEliminarFicha = (fichaId: string) => {
+    const target = fichas.find(f => f.id === fichaId);
+    if (!target) return;
+
+    // Misma validación estricta de dependencias que ya se usa para Instructores
+    // (handleEliminarInstructor): una ficha con información hija (actividades,
+    // horarios, seguimiento por RAP, juicios evaluativos u horas ejecutadas
+    // reportadas) no debe poder borrarse de un click — se perdería trabajo real
+    // sin aviso. Solo procede si la ficha está realmente vacía.
+    const actividadesHijas = actividades.filter(a => a.fichaId === fichaId);
+    const bloquesHijos = horarios.filter(h => h.fichaId === fichaId);
+    const rapsSegHijos = rapsSeguimiento.filter(s => s.fichaId === fichaId);
+    const juiciosHijos = reportesJuicios[target.numero_ficha];
+    const horasEjecHijas = registrosHorasEjecutadas.filter(r => r.fichaNumero === target.numero_ficha);
+
+    if (actividadesHijas.length > 0 || bloquesHijos.length > 0 || rapsSegHijos.length > 0 || juiciosHijos || horasEjecHijas.length > 0) {
+      const detalles: string[] = [];
+      if (actividadesHijas.length > 0) detalles.push(`${actividadesHijas.length} actividad(es) de seguimiento`);
+      if (bloquesHijos.length > 0) detalles.push(`${bloquesHijos.length} bloque(s) de horario`);
+      if (rapsSegHijos.length > 0) detalles.push(`${rapsSegHijos.length} registro(s) de seguimiento por RAP`);
+      if (juiciosHijos) detalles.push('juicios evaluativos cargados');
+      if (horasEjecHijas.length > 0) detalles.push(`${horasEjecHijas.length} registro(s) de horas ejecutadas`);
+      alert(`No se puede eliminar la ficha ${target.numero_ficha} porque tiene información vinculada: ${detalles.join(', ')}. Elimine o migre esos datos primero.`);
+      return;
+    }
+
+    if (confirm(`¿Confirma que desea eliminar la ficha ${target.numero_ficha} (${target.programaNombre})? No tiene información vinculada.`)) {
+      setFichas(prev => prev.filter(f => f.id !== fichaId));
+      setHorarios(prev => prev.filter(h => h.fichaId !== fichaId));
+      setActividades(prev => prev.filter(a => a.fichaId !== fichaId));
+      setRapsSeguimiento(prev => prev.filter(s => s.fichaId !== fichaId));
+      // Las filas de actividades_seguimiento, bloques_horarios y raps_seguimiento en
+      // Supabase tienen ON DELETE CASCADE hacia fichas, así que basta con borrar la ficha.
+      deleteFichaFromSupabase(fichaId).catch(err => {
+        console.error('Error al eliminar ficha en Supabase:', err);
+      });
+      if (selectedFicha?.id === fichaId) {
+        setSelectedFicha(null);
+      }
+      registrarLog(
+        'ELIMINAR_FICHA',
+        'Gestión de Fichas',
+        `Ficha ${target.numero_ficha} (${target.programaNombre}) eliminada del sistema.`
+      );
+    }
+  };
+
+  const handleEditarFicha = (ficha: Ficha) => {
+    setFichaParaEditar(ficha);
+    setIsModalFichaOpen(true);
+  };
+
+  const handleActualizarFicha = (fichaActualizada: Ficha) => {
+    setFichas(prev => prev.map(f => f.id === fichaActualizada.id ? fichaActualizada : f));
+    if (selectedFicha?.id === fichaActualizada.id) {
+      setSelectedFicha(fichaActualizada);
+    }
+    updateFichaInSupabase(fichaActualizada.id, fichaActualizada).catch(err => {
+      console.error('Error al actualizar ficha en Supabase:', err);
+    });
+    setFichaParaEditar(null);
+    registrarLog(
+      'EDITAR_FICHA',
+      'Gestión de Fichas',
+      `Ficha ${fichaActualizada.numero_ficha} actualizada (${fichaActualizada.programaNombre}).`
+    );
+  };
+
+  // Manejo de Competencias y RAPs (Archivo de Seguimiento)
+  const handleActualizarCompetenciasYRaps = (
+    nuevasComp: Competencia[], 
+    nuevosRaps: ResultadoAprendizaje[],
+    nuevosRegistrosSeg?: RegistroArchivoSeguimiento[]
+  ) => {
+    setCompetencias(nuevasComp);
+    setRaps(nuevosRaps);
+
+    if (nuevosRegistrosSeg && nuevosRegistrosSeg.length > 0) {
+      setRegistrosArchivoSeguimiento(prev => {
+        const progTarget = nuevosRegistrosSeg[0]?.programaCodigo;
+        const otros = progTarget ? prev.filter(r => r.programaCodigo !== progTarget) : prev;
+        return [...otros, ...nuevosRegistrosSeg];
+      });
+    }
+
+    // Auto-generar y enriquecer especialidades temáticas concisas desde las competencias
+    if (nuevasComp.length > 0) {
+      setEspecialidades(prevEsp => generarEspecialidadesDesdeCompetencias(nuevasComp, prevEsp));
+    }
+
+    registrarLog(
+      'ARCHIVO_SEGUIMIENTO_ACTUALIZADO',
+      'Competencias & Seguimiento',
+      `Sincronizadas ${nuevasComp.length} Competencias, ${nuevosRaps.length} RAPs y ${nuevosRegistrosSeg?.length || 0} registros granulares de seguimiento.`
+    );
+  };
+
+  // Manejo de Horas Ejecutadas por Instructor y Competencia.
+  // Reglas: (1) la ficha del archivo debe coincidir con la ficha seleccionada,
+  // si no se rechaza completo; (2) solo se aceptan horas de instructores que
+  // YA están asignados en esta ficha (Horarios o Seguimiento) — el resto se
+  // descarta con advertencia, nunca crea instructores nuevos; (3) cada cargue
+  // REEMPLAZA las horas previas de esta ficha (el archivo es progresivo, no
+  // sumativo); (4) no queda persistido el crudo del archivo.
+  const handleGuardarHorasEjecutadas = (nuevosRegistros: RegistroHorasEjecutadas[]): { exito: boolean; mensaje: string } => {
+    if (!selectedFicha) {
+      return { exito: false, mensaje: 'Selecciona una ficha antes de cargar el archivo de Horas Instructor Ficha.' };
+    }
+
+    const fichasEnArchivo = Array.from(new Set(nuevosRegistros.map(r => r.fichaNumero).filter((f): f is string => !!f)));
+    if (fichasEnArchivo.length === 0) {
+      return { exito: false, mensaje: 'No se pudo determinar a qué ficha corresponde este archivo. Verifica que incluya el número de ficha.' };
+    }
+    if (fichasEnArchivo.some(f => f !== selectedFicha.numero_ficha)) {
+      return {
+        exito: false,
+        mensaje: `El archivo corresponde a la ficha ${fichasEnArchivo.join(', ')}, pero tienes seleccionada la ficha ${selectedFicha.numero_ficha}. Se rechaza el cargue para evitar mezclar datos entre fichas.`
+      };
+    }
+
+    // Instructores YA asignados en esta ficha, vía Horarios o vía Seguimiento
+    const normalizar = (s: string) => s.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+    const asignadosEnFicha = new Set<string>();
+    horarios.filter(h => h.fichaId === selectedFicha.id && h.instructorNombre).forEach(h => asignadosEnFicha.add(normalizar(h.instructorNombre!)));
+    rapsSeguimiento.filter(s => (s.fichaId === selectedFicha.id || s.fichaNumero === selectedFicha.numero_ficha) && s.instructorNombre).forEach(s => asignadosEnFicha.add(normalizar(s.instructorNombre!)));
+
+    const registrosAceptados = nuevosRegistros.filter(r => r.instructorNombre && asignadosEnFicha.has(normalizar(r.instructorNombre)));
+    const registrosDescartados = nuevosRegistros.length - registrosAceptados.length;
+
+    if (registrosAceptados.length === 0) {
+      return {
+        exito: false,
+        mensaje: 'Ninguno de los instructores de este archivo está asignado todavía a esta ficha (en Horarios o Seguimiento). Asigna primero los instructores antes de cargar sus horas.'
+      };
+    }
+
+    // Reemplaza (no suma) las horas previas de ESTA ficha
+    setRegistrosHorasEjecutadas(prev => [
+      ...prev.filter(r => r.fichaNumero !== selectedFicha.numero_ficha),
+      ...registrosAceptados
+    ]);
+
+    const sumFicha = registrosAceptados.reduce((acc, r) => acc + r.horasEjecutadas, 0);
+    setFichas(prevFichas => prevFichas.map(f => f.id === selectedFicha.id ? { ...f, horasEjecutadas: sumFicha } : f));
+
+    // Enriquecer perfil de instructores YA existentes (nunca crea nuevos aquí)
+    setInstructores(prevInst => caracterizarInstructoresDesdeHoras(registrosAceptados, prevInst));
+
+    registrarLog(
+      'HORAS_EJECUTADAS_INGESTADAS',
+      'Ingesta & Seguimiento',
+      `Cargadas ${sumFicha} horas ejecutadas para la ficha ${selectedFicha.numero_ficha} en ${registrosAceptados.length} registros (reemplazando el cargue anterior de esta ficha).` +
+      (registrosDescartados > 0 ? ` Se descartaron ${registrosDescartados} registro(s) de instructor(es) sin asignación previa en esta ficha.` : '')
+    );
+
+    return {
+      exito: true,
+      mensaje: `Se cargaron ${sumFicha} horas de ${registrosAceptados.length} registro(s) para la ficha ${selectedFicha.numero_ficha}, reemplazando el cargue anterior.` +
+        (registrosDescartados > 0 ? ` Se descartaron ${registrosDescartados} registro(s) porque el instructor no está asignado todavía a esta ficha.` : '')
+    };
+  };
+
+  // Manejo de Juicios Evaluativos por Ficha SofiaPlus (.xls). Reglas:
+  // (1) la ficha ya debe existir y coincidir con la seleccionada — nunca se
+  //     auto-crea una ficha desde este archivo;
+  // (2) la ficha ya debe tener competencias/RAPs (Planeación Pedagógica);
+  // (3) cada (competencia, RAP) del archivo se empareja contra el catálogo
+  //     real por texto (nunca por código — SofiaPlus y Planeación Pedagógica
+  //     usan numeraciones distintas); si no hay coincidencia con confianza
+  //     suficiente (Etapa Práctica, competencia sin match, o RAP ambiguo),
+  //     ese juicio se salta sin tocar Seguimiento;
+  // (4) un RAP pasa a CALIFICADO solo si ≥70% de los aprendices EN FORMACIÓN
+  //     o CONDICIONADO (activos) tienen juicio APROBADO en ese RAP puntual;
+  // (5) el instructor asignado en Seguimiento NUNCA se toca desde aquí —
+  //     el "funcionario que evaluó" no es necesariamente quien dicta el RAP;
+  // (6) se recalculan retención/deserción de la ficha desde los estados
+  //     reales de matrícula de los aprendices de este cargue;
+  // (7) no queda persistido el crudo del archivo (solo en memoria de sesión).
+  // fichaObjetivo es opcional: cuando el cargue viene de un contexto que ya
+  // sabe exactamente para qué ficha es (p. ej. la acción "cargar juicios"
+  // sobre una fila puntual en Avance de Fichas), se pasa explícitamente para
+  // no depender de cuál sea la ficha seleccionada globalmente en ese momento
+  // — de lo contrario, si el usuario tiene otra ficha activa en el resto de
+  // la app, el archivo se rechazaría por "no coincidir" aunque sí coincida
+  // con la ficha sobre la que realmente se quiso actuar.
+  const handleGuardarJuiciosEvaluativos = (reporte: ReporteJuiciosFicha, fichaObjetivo?: Ficha): { exito: boolean; mensaje: string } => {
+    const ficha = fichaObjetivo || selectedFicha;
+    if (!ficha) {
+      return { exito: false, mensaje: 'Selecciona una ficha antes de cargar el reporte de Juicios Evaluativos.' };
+    }
+    if (reporte.fichaNumero !== ficha.numero_ficha) {
+      return {
+        exito: false,
+        mensaje: `El archivo corresponde a la ficha ${reporte.fichaNumero}, pero se quiere cargar sobre la ficha ${ficha.numero_ficha}. Se rechaza el cargue para evitar mezclar datos entre fichas.`
+      };
+    }
+
+    const catalogoRapsPrograma = raps.filter(r => r.programaCodigo === ficha.programaCodigo);
+    if (catalogoRapsPrograma.length === 0) {
+      return {
+        exito: false,
+        mensaje: 'Esta ficha todavía no tiene competencias ni RAPs cargados (Planeación Pedagógica). Carga primero ese archivo para el programa antes de subir Juicios Evaluativos.'
+      };
+    }
+
+    // 1) Auto-crear/enriquecer instructores detectados como evaluadores en
+    // SofiaPlus (sin documento, sin cuenta de usuario, nunca como líder).
+    const resultadoInstructores = caracterizarInstructoresDesdeJuicios(reporte, instructores);
+    setInstructores(resultadoInstructores.instructores);
+
+    // 2) Emparejar cada (competencia, RAP) del archivo contra el catálogo
+    // real y agregar, por RAP real, cuántos aprendices activos fueron
+    // evaluados y cuántos de ellos tienen juicio APROBADO.
+    interface AgregadoRap { aprobadosActivos: number; rap: ResultadoAprendizaje }
+    const agregadoPorRap = new Map<string, AgregadoRap>();
+    let contadorEtapaPractica = 0;
+    let contadorSinMatch = 0;
+    let contadorAmbiguo = 0;
+
+    // IMPORTANTE: el 70% se calcula sobre el TOTAL de aprendices activos de
+    // la ficha (EN FORMACION + CONDICIONADO), no solo sobre los que ya
+    // tienen una fila de juicio para ese RAP puntual en este archivo. Si se
+    // usara como denominador solo "los ya evaluados en este RAP", un RAP
+    // podría marcarse CALIFICADO con, por ejemplo, 15 aprobados de 15
+    // evaluados aunque todavía falten 10 de los 25 aprendices activos por
+    // evaluar — un falso 100% que en realidad es 60% del grupo.
+    const totalActivosFicha = reporte.aprendices.filter(
+      a => a.estadoMatricula === 'EN FORMACION' || a.estadoMatricula === 'CONDICIONADO'
+    ).length;
+
+    reporte.aprendices.forEach(ap => {
+      const esActivo = ap.estadoMatricula === 'EN FORMACION' || ap.estadoMatricula === 'CONDICIONADO';
+      ap.juicios.forEach(j => {
+        const rapTexto = j.rapDenominacion || '';
+        if (!rapTexto) return;
+        const { rap, motivo } = emparejarJuicioConCatalogo(j.competenciaDenominacion || '', rapTexto, catalogoRapsPrograma);
+
+        if (motivo === 'ETAPA_PRACTICA') { contadorEtapaPractica += 1; return; }
+        if (motivo === 'RAP_AMBIGUO') { contadorAmbiguo += 1; return; }
+        if (!rap) { contadorSinMatch += 1; return; }
+        if (!esActivo) return; // el 70% se calcula solo sobre aprendices activos
+
+        if (!agregadoPorRap.has(rap.id)) {
+          agregadoPorRap.set(rap.id, { aprobadosActivos: 0, rap });
+        }
+        const agg = agregadoPorRap.get(rap.id)!;
+        const estadoJuicio = (j.estado || '').toUpperCase();
+        if (estadoJuicio.includes('APROBADO') && !estadoJuicio.includes('NO APROBADO')) {
+          agg.aprobadosActivos += 1;
+        }
+      });
+    });
+
+    // 3) Solo los RAPs que alcanzan >=70% de aprobación sobre el TOTAL de
+    // activos de la ficha pasan a CALIFICADO. Los demás se dejan exactamente
+    // como estaban — como si el instructor no hubiese calificado.
+    let rapsCalificados = 0;
+    setRapsSeguimiento(prevSeg => {
+      const nuevoSeg = [...prevSeg];
+      agregadoPorRap.forEach(({ aprobadosActivos, rap }) => {
+        if (totalActivosFicha === 0) return;
+        const pct = (aprobadosActivos / totalActivosFicha) * 100;
+        if (pct < 70) return;
+
+        rapsCalificados += 1;
+        const idx = nuevoSeg.findIndex(s =>
+          (s.fichaId === ficha.id || s.fichaNumero === ficha.numero_ficha) &&
+          s.competenciaCodigo === rap.competenciaCodigo &&
+          s.rapCodigo === rap.codigoRap
+        );
+
+        if (idx >= 0) {
+          // El instructor asignado NUNCA se toca desde Juicios — solo el estado.
+          nuevoSeg[idx] = {
+            ...nuevoSeg[idx],
+            estado: 'CALIFICADO',
+            fuenteEstado: 'JUICIOS',
+            fechaActualizacion: new Date().toISOString()
+          };
+        } else {
+          nuevoSeg.push({
+            id: `rap_seg_${ficha.id}_${rap.codigoRap}`,
+            fichaId: ficha.id,
+            fichaNumero: ficha.numero_ficha,
+            programaCodigo: ficha.programaCodigo,
+            competenciaCodigo: rap.competenciaCodigo,
+            competenciaDenominacion: rap.competenciaDenominacion || '',
+            rapCodigo: rap.codigoRap,
+            rapDenominacion: rap.denominacion,
+            estado: 'CALIFICADO',
+            fuenteEstado: 'JUICIOS',
+            fechaActualizacion: new Date().toISOString()
+          });
+        }
+      });
+      return nuevoSeg;
+    });
+
+    // 4) Recalcular retención/deserción desde los estados reales de
+    // matrícula de este cargue (aplazado, cancelado, retiro voluntario,
+    // condicionado, etc.), no desde los agregados que traía el archivo.
+    const totalAprendices = reporte.aprendices.length;
+    const activosCount = reporte.aprendices.filter(a => a.estadoMatricula === 'EN FORMACION' || a.estadoMatricula === 'CONDICIONADO').length;
+    const canceladosCount = reporte.aprendices.filter(a => a.estadoMatricula === 'CANCELADO').length;
+    const retiroVolCount = reporte.aprendices.filter(a => a.estadoMatricula === 'RETIRO VOLUNTARIO').length;
+    const aplazadosCount = reporte.aprendices.filter(a => a.estadoMatricula === 'APLAZADO').length;
+    const condicionadosCount = reporte.aprendices.filter(a => a.estadoMatricula === 'CONDICIONADO').length;
+    const trasladadosCount = reporte.aprendices.filter(a => a.estadoMatricula === 'TRASLADADO').length;
+    const retencion = totalAprendices > 0 ? Number(((activosCount / totalAprendices) * 100).toFixed(1)) : ficha.tasaRetencion ?? 100;
+    const desercion = totalAprendices > 0 ? Number((((canceladosCount + retiroVolCount) / totalAprendices) * 100).toFixed(1)) : ficha.tasaDesercion ?? 0;
+
+    setFichas(prev => prev.map(f => {
+      if (f.id !== ficha.id) return f;
+      return {
+        ...f,
+        // matriculaInicial NUNCA se toca desde aquí: es la línea base fija
+        // de matrícula con la que se calculan las fórmulas institucionales
+        // de cierre (ver CierresView, PRD 3.4). El total de aprendices que
+        // trae ESTE cargue de Juicios es el estado actual, no la matrícula
+        // inicial de la ficha.
+        aprendicesActivos: activosCount,
+        aprendicesRetiroVoluntario: retiroVolCount,
+        aprendicesCancelados: canceladosCount,
+        aprendicesAplazados: aplazadosCount,
+        aprendicesCondicionados: condicionadosCount,
+        aprendicesTrasladados: trasladadosCount,
+        tasaRetencion: retencion,
+        tasaDesercion: desercion,
+        progresoCurricular: reporte.porcentajeAprobacionFicha
+      };
+    }));
+
+    // Se conserva en memoria (sesión) solo para el detalle de "último cargue" —
+    // no se persiste en localStorage ni se usa como fuente de verdad.
+    setReportesJuicios(prev => ({ ...prev, [reporte.fichaNumero]: reporte }));
+
+    const detallesSalto: string[] = [];
+    if (contadorEtapaPractica > 0) detallesSalto.push(`${contadorEtapaPractica} de Etapa Práctica (fuera de alcance)`);
+    if (contadorSinMatch > 0) detallesSalto.push(`${contadorSinMatch} sin RAP correspondiente en el catálogo`);
+    if (contadorAmbiguo > 0) detallesSalto.push(`${contadorAmbiguo} con RAP ambiguo (varios candidatos igual de parecidos)`);
+
+    registrarLog(
+      'CARGUE_JUICIOS_EVALUATIVOS',
+      'Ingesta de Datos',
+      `Reporte oficial de Juicios Evaluativos SofiaPlus cargado para la Ficha ${reporte.fichaNumero}. ${reporte.totalRegistros} juicios, ${reporte.totalAprendices} aprendices, ${rapsCalificados} RAP(s) marcados CALIFICADO (>=70% activos aprobados).` +
+      (detallesSalto.length > 0 ? ` Juicios saltados sin tocar Seguimiento: ${detallesSalto.join(', ')}.` : '') +
+      (resultadoInstructores.advertenciasHomonimo.length > 0 ? ` Advertencias de posible homónimo: ${resultadoInstructores.advertenciasHomonimo.join(' | ')}` : '')
+    );
+
+    return {
+      exito: true,
+      mensaje: `Juicios Evaluativos procesados para la ficha ${ficha.numero_ficha}: ${rapsCalificados} RAP(s) quedaron CALIFICADO(S) (≥70% de activos aprobados).` +
+        (detallesSalto.length > 0 ? ` Se saltaron sin modificar Seguimiento: ${detallesSalto.join(', ')}.` : '') +
+        (resultadoInstructores.advertenciasHomonimo.length > 0 ? ` ⚠ Posible(s) homónimo(s): ${resultadoInstructores.advertenciasHomonimo.join(' | ')}` : '')
+    };
+  };
+
+  // Borrar estructura actual para carga limpia desde cero
+  const handleLimpiarEstructura = () => {
+    setCompetencias([]);
+    setRaps([]);
+    setRegistrosArchivoSeguimiento([]);
+    localStorage.setItem('sena_competencias', JSON.stringify([]));
+    localStorage.setItem('sena_raps', JSON.stringify([]));
+    localStorage.setItem('sena_archivo_seguimiento_registros', JSON.stringify([]));
+    registrarLog(
+      'ESTRUCTURA_LIMPIADA',
+      'Competencias & RAPs',
+      'Catálogo de competencias, RAPs y registros de seguimiento vaciados por el usuario para una recarga limpia.'
+    );
+  };
+
+  // Manejo de Horarios
+
+  // Sincroniza el Seguimiento de RAPs con el estado ACTUAL de un bloque de
+  // Horario: si el bloque tiene instructor, lo asigna y pasa a EN_EJECUCION;
+  // si el bloque quedó "vacante" (programado, sin instructor todavía), el RAP
+  // vuelve a PENDIENTE pero SIN perder el historial de quién ya lo cubrió.
+  // Se reutiliza al crear un bloque, al asignar un instructor a uno vacante y
+  // al dejar vacante uno que ya tenía instructor (fin de contrato/reemplazo).
+  const sincronizarSeguimientoDesdeBloque = React.useCallback((bloque: Omit<BloqueHorario, 'id'> | BloqueHorario) => {
+    if (!bloque.fichaId) return;
+    const fichaTarget = fichas.find(f => f.id === bloque.fichaId);
+    const fichaNum = fichaTarget?.numero_ficha || selectedFicha?.numero_ficha || '';
+    const progCod = fichaTarget?.programaCodigo || selectedFicha?.programaCodigo || '';
+
+    // Competencia única del bloque: rapsAsignados nunca mezcla RAPs de
+    // competencias distintas (BloqueHorario solo tiene un competenciaCodigo).
+    const compCodigoBloque = bloque.competenciaCodigo;
+    const codigosRapsAfectados = new Set<string>();
+    if (bloque.rapsAsignados && bloque.rapsAsignados.length > 0) {
+      bloque.rapsAsignados.forEach(r => codigosRapsAfectados.add(r.codigo));
+    } else if (bloque.rapCodigo && !bloque.esCompetenciaCompleta) {
+      codigosRapsAfectados.add(bloque.rapCodigo);
+    } else if (bloque.esCompetenciaCompleta && bloque.competenciaCodigo) {
+      raps.filter(r => r.competenciaCodigo === bloque.competenciaCodigo).forEach(r => codigosRapsAfectados.add(r.codigoRap));
+    }
+    if (codigosRapsAfectados.size === 0) return;
+
+    const itemsParaSupabase: RapSeguimiento[] = [];
+
+    setRapsSeguimiento(prevRapsSeg => {
+      const nuevoSeg = [...prevRapsSeg];
+      codigosRapsAfectados.forEach(rapCod => {
+        const rapObj = raps.find(r => r.codigoRap === rapCod && r.competenciaCodigo === compCodigoBloque);
+        const compObj = competencias.find(c => c.codigo === compCodigoBloque);
+        // El código de RAP (p.ej. "RAP 01") se reinicia en cada competencia,
+        // así que competenciaCodigo es obligatorio en la comparación.
+        const idx = nuevoSeg.findIndex(s =>
+          (s.fichaId === bloque.fichaId || s.fichaNumero === fichaNum) &&
+          s.competenciaCodigo === compCodigoBloque &&
+          s.rapCodigo === rapCod
+        );
+        const anterior = idx >= 0 ? nuevoSeg[idx] : undefined;
+
+        // Si había un instructor DISTINTO cubriendo este RAP (por horario o
+        // manual) y ahora llega otro, o el bloque queda vacante, se cierra su
+        // paso en el historial — nunca se borra silenciosamente.
+        const huboCambioDeInstructor = !!anterior?.instructorNombre &&
+          anterior.instructorNombre !== bloque.instructorNombre;
+        const historialActualizado: HistorialInstructorRap[] = huboCambioDeInstructor
+          ? [
+              ...(anterior?.historialInstructores || []),
+              {
+                instructorId: anterior!.instructorId,
+                instructorNombre: anterior!.instructorNombre!,
+                trimestre: bloque.trimestre,
+                fechaFin: new Date().toISOString(),
+                motivo: bloque.instructorId ? 'REEMPLAZO' : 'VACANTE_HORARIO'
+              }
+            ]
+          : (anterior?.historialInstructores || []);
+
+        // Un bloque vacante nunca debe forzar EN_EJECUCION; si ya estaba
+        // CALIFICADO/SIN_CALIFICAR (juicio evaluativo real), eso no se toca.
+        const estadoResultante: EstadoRap = bloque.instructorId
+          ? (!anterior || anterior.estado === 'PENDIENTE' ? 'EN_EJECUCION' : anterior.estado)
+          : (anterior && anterior.estado !== 'PENDIENTE' && anterior.estado !== 'EN_EJECUCION' ? anterior.estado : 'PENDIENTE');
+
+        const entradaFinal: RapSeguimiento = {
+          id: anterior?.id || generarUuid(),
+          fichaId: bloque.fichaId,
+          fichaNumero: fichaNum,
+          programaCodigo: progCod,
+          competenciaCodigo: compObj?.codigo || compCodigoBloque || '',
+          competenciaDenominacion: compObj?.denominacion || bloque.competenciaNombre || anterior?.competenciaDenominacion || '',
+          rapCodigo: rapCod,
+          rapDenominacion: rapObj?.denominacion || anterior?.rapDenominacion || '',
+          instructorId: bloque.instructorId || undefined,
+          instructorNombre: bloque.instructorNombre || undefined,
+          fuenteInstructor: 'HORARIO',
+          fuenteEstado: anterior?.fuenteEstado,
+          estado: estadoResultante,
+          historialInstructores: historialActualizado,
+          fechaActualizacion: new Date().toISOString()
+        };
+
+        if (idx >= 0) nuevoSeg[idx] = entradaFinal; else nuevoSeg.push(entradaFinal);
+        itemsParaSupabase.push(entradaFinal);
+      });
+      return nuevoSeg;
+    });
+
+    // Antes esta sincronización solo quedaba en localStorage — un Coordinador
+    // en otro equipo no veía que el RAP pasó a "En Ejecución" al programarlo
+    // en Horarios. Se sube también a Supabase, igual que el resto del módulo.
+    itemsParaSupabase.forEach(item => {
+      upsertRapSeguimientoInSupabase(item).catch(err => {
+        console.error('Error al sincronizar seguimiento de RAP (desde Horario) en Supabase:', err);
+      });
+    });
+  }, [fichas, selectedFicha, raps, competencias]);
+
+  const handleGuardarBloque = (nuevoBloque: Omit<BloqueHorario, 'id'>) => {
+    const bloque: BloqueHorario = {
+      ...nuevoBloque,
+      vacante: !nuevoBloque.instructorId,
+      id: `blq_${Date.now()}`
+    };
+    setHorarios(prev => [...prev, bloque]);
+
+    // Incrementar horas asignadas al instructor (si el bloque quedó vacante,
+    // no hay a quién incrementarle horas todavía).
+    if (nuevoBloque.instructorId) {
+      setInstructores(prev => prev.map(inst => {
+        if (inst.id === nuevoBloque.instructorId) {
+          return { ...inst, horasSemanalesAsignadas: inst.horasSemanalesAsignadas + nuevoBloque.duracionHoras };
+        }
+        return inst;
+      }));
+    }
+
+    // Sincronizar instructor (o dejar vacante) y estado en el Seguimiento de RAPs
+    sincronizarSeguimientoDesdeBloque(bloque);
+
+    const detalleModalidad = nuevoBloque.esCompetenciaCompleta
+      ? `[COMPETENCIA COMPLETA: ${nuevoBloque.competenciaCodigo}]`
+      : `[${nuevoBloque.rapsAsignados?.length || 1} RAPs: ${nuevoBloque.rapCodigo}]`;
+
+    const numFicha = selectedFicha ? selectedFicha.numero_ficha : 'N/A';
+    const quienDetalle = nuevoBloque.instructorId ? nuevoBloque.instructorNombre : 'VACANTE (sin instructor asignado)';
+    registrarLog(
+      'ASIGNACION_BLOQUE_HORARIO',
+      'Programación de Horarios',
+      `Asignado ${quienDetalle} ${detalleModalidad} en ${nuevoBloque.diaSemana} (${nuevoBloque.franja}) Ficha ${numFicha}`
+    );
+  };
+
+  // Quitar SOLO el instructor de un bloque ya programado (p.ej. terminó su
+  // contrato o el trimestre lo requiere), dejando el RAP/día/franja/trimestre
+  // reservado como "vacante" para que otro instructor lo cubra después — sin
+  // perder el espacio en el horario ni borrar que este instructor ya estuvo ahí.
+  const handleQuitarInstructorDeBloque = (bloqueId: string) => {
+    const bloqueOriginal = horarios.find(b => b.id === bloqueId);
+    if (!bloqueOriginal || !bloqueOriginal.instructorId) return;
+
+    if (bloqueOriginal.instructorId) {
+      setInstructores(prev => prev.map(inst =>
+        inst.id === bloqueOriginal.instructorId
+          ? { ...inst, horasSemanalesAsignadas: Math.max(0, inst.horasSemanalesAsignadas - bloqueOriginal.duracionHoras) }
+          : inst
+      ));
+    }
+
+    const bloqueVacante: BloqueHorario = {
+      ...bloqueOriginal,
+      instructorId: undefined,
+      instructorNombre: undefined,
+      vacante: true
+    };
+    setHorarios(prev => prev.map(b => b.id === bloqueId ? bloqueVacante : b));
+    sincronizarSeguimientoDesdeBloque(bloqueVacante);
+
+    const numFicha = selectedFicha ? selectedFicha.numero_ficha : 'N/A';
+    registrarLog(
+      'BLOQUE_MARCADO_VACANTE',
+      'Programación de Horarios',
+      `${bloqueOriginal.instructorNombre} dejó de cubrir ${bloqueOriginal.rapCodigo} (${bloqueOriginal.diaSemana} ${bloqueOriginal.franja}) en Ficha ${numFicha} — espacio queda vacante para reasignar.`
+    );
+  };
+
+  // Asignar un instructor a un bloque que estaba vacante (o reemplazar el que
+  // tenía), sin tener que recrear el bloque desde cero.
+  const handleAsignarInstructorABloque = (bloqueId: string, instructor: Instructor) => {
+    const bloqueOriginal = horarios.find(b => b.id === bloqueId);
+    if (!bloqueOriginal) return;
+
+    setInstructores(prev => prev.map(inst =>
+      inst.id === instructor.id
+        ? { ...inst, horasSemanalesAsignadas: inst.horasSemanalesAsignadas + bloqueOriginal.duracionHoras }
+        : inst
+    ));
+
+    const bloqueActualizado: BloqueHorario = {
+      ...bloqueOriginal,
+      instructorId: instructor.id,
+      instructorNombre: instructor.nombreCompleto,
+      vacante: false
+    };
+    setHorarios(prev => prev.map(b => b.id === bloqueId ? bloqueActualizado : b));
+    sincronizarSeguimientoDesdeBloque(bloqueActualizado);
+
+    const numFicha = selectedFicha ? selectedFicha.numero_ficha : 'N/A';
+    registrarLog(
+      'INSTRUCTOR_ASIGNADO_A_VACANTE',
+      'Programación de Horarios',
+      `${instructor.nombreCompleto} cubre ahora ${bloqueOriginal.rapCodigo} (${bloqueOriginal.diaSemana} ${bloqueOriginal.franja}) en Ficha ${numFicha}.`
+    );
+  };
+
+  const handleEliminarBloque = (bloqueId: string) => {
+    const bloqueAEliminar = horarios.find(b => b.id === bloqueId);
+    if (bloqueAEliminar) {
+      setInstructores(prev => prev.map(inst => {
+        if (inst.id === bloqueAEliminar.instructorId) {
+          return { ...inst, horasSemanalesAsignadas: Math.max(0, inst.horasSemanalesAsignadas - bloqueAEliminar.duracionHoras) };
+        }
+        return inst;
+      }));
+
+      // Revertir en Seguimiento los RAPs que este bloque había asignado: si el
+      // instructor/estado de ese RAP sigue viniendo de Horario (no fue
+      // sobrescrito manualmente) y ningún OTRO bloque de horario lo sigue
+      // cubriendo, se regresa a su estado inicial (sin instructor, PENDIENTE).
+      // Antes, liberar un bloque no revertía nada en Seguimiento: el RAP se
+      // quedaba marcado "En Ejecución" con el instructor aunque ya no tuviera
+      // ninguna clase programada.
+      const codigosRapsDelBloque = new Set<string>();
+      if (bloqueAEliminar.rapsAsignados && bloqueAEliminar.rapsAsignados.length > 0) {
+        bloqueAEliminar.rapsAsignados.forEach(r => codigosRapsDelBloque.add(r.codigo));
+      } else if (bloqueAEliminar.rapCodigo && !bloqueAEliminar.esCompetenciaCompleta) {
+        codigosRapsDelBloque.add(bloqueAEliminar.rapCodigo);
+      } else if (bloqueAEliminar.esCompetenciaCompleta && bloqueAEliminar.competenciaCodigo) {
+        raps.filter(r => r.competenciaCodigo === bloqueAEliminar.competenciaCodigo).forEach(r => codigosRapsDelBloque.add(r.codigoRap));
+      }
+
+      if (codigosRapsDelBloque.size > 0 && bloqueAEliminar.fichaId) {
+        const fichaTarget = fichas.find(f => f.id === bloqueAEliminar.fichaId);
+        const fichaNumBloque = fichaTarget?.numero_ficha || '';
+        const compCodigoBloque = bloqueAEliminar.competenciaCodigo;
+        // Bloques que quedan DESPUÉS de esta eliminación (para saber si algún
+        // otro bloque todavía cubre el mismo RAP y por eso no debe revertirse).
+        const horariosRestantes = horarios.filter(b => b.id !== bloqueId);
+        const itemsRevertidos: RapSeguimiento[] = [];
+
+        setRapsSeguimiento(prevRapsSeg => {
+          const nuevoSeg = [...prevRapsSeg];
+          codigosRapsDelBloque.forEach(rapCod => {
+            const siguemAsignadoEnOtroBloque = horariosRestantes.some(h =>
+              h.fichaId === bloqueAEliminar.fichaId && (
+                (h.rapsAsignados && h.rapsAsignados.some(r => r.codigo === rapCod)) ||
+                h.rapCodigo === rapCod ||
+                (h.esCompetenciaCompleta && h.competenciaCodigo === compCodigoBloque)
+              )
+            );
+            if (siguemAsignadoEnOtroBloque) return;
+
+            const idx = nuevoSeg.findIndex(s =>
+              (s.fichaId === bloqueAEliminar.fichaId || s.fichaNumero === fichaNumBloque) &&
+              s.competenciaCodigo === compCodigoBloque &&
+              s.rapCodigo === rapCod
+            );
+
+            // Solo se revierte si el seguimiento actual vino de Horario: si el
+            // instructor lo cambió manualmente después, esa decisión manual
+            // prevalece y no se toca.
+            if (idx >= 0 && nuevoSeg[idx].fuenteInstructor === 'HORARIO') {
+              // Si el RAP tenía instructor al momento de liberar el bloque, su
+              // paso se cierra en el historial en vez de borrarse sin dejar rastro.
+              const previo = nuevoSeg[idx];
+              const historialActualizado = previo.instructorNombre
+                ? [
+                    ...(previo.historialInstructores || []),
+                    {
+                      instructorId: previo.instructorId,
+                      instructorNombre: previo.instructorNombre,
+                      trimestre: bloqueAEliminar.trimestre,
+                      fechaFin: new Date().toISOString(),
+                      motivo: 'FIN_HORARIO' as const
+                    }
+                  ]
+                : (previo.historialInstructores || []);
+
+              nuevoSeg[idx] = {
+                ...nuevoSeg[idx],
+                instructorId: undefined,
+                instructorNombre: undefined,
+                fuenteInstructor: undefined,
+                estado: 'PENDIENTE',
+                fuenteEstado: undefined,
+                historialInstructores: historialActualizado,
+                fechaActualizacion: new Date().toISOString()
+              };
+              itemsRevertidos.push(nuevoSeg[idx]);
+            }
+          });
+          return nuevoSeg;
+        });
+
+        itemsRevertidos.forEach(item => {
+          upsertRapSeguimientoInSupabase(item).catch(err => {
+            console.error('Error al revertir seguimiento de RAP en Supabase:', err);
+          });
+        });
+      }
+    }
+
+    setHorarios(prev => prev.filter(b => b.id !== bloqueId));
+    const numFicha = selectedFicha ? selectedFicha.numero_ficha : 'N/A';
+    registrarLog('LIBERACION_BLOQUE_HORARIO', 'Programación de Horarios', `Bloque liberado en Ficha ${numFicha}`);
+  };
+
+  // Manejo de Seguimiento de RAPs Individuales
+  const handleActualizarRapSeguimiento = (itemActualizado: RapSeguimiento) => {
+    // Se resuelve el objeto final antes del setState para poder reutilizarlo tal cual
+    // en el upsert a Supabase (antes este cambio solo se guardaba en localStorage,
+    // por lo que un Coordinador y un Auxiliar en equipos distintos veían datos
+    // distintos del seguimiento por RAP de una misma ficha).
+    const itemFinal: RapSeguimiento = { ...itemActualizado, fechaActualizacion: new Date().toISOString() };
+
+    setRapsSeguimiento(prev => {
+      // El código de RAP (p.ej. "RAP 01") se reinicia en cada competencia, así
+      // que competenciaCodigo es obligatorio en la comparación — de lo
+      // contrario esto pisa el mismo "RAP 01" de otra competencia de la ficha.
+      const idx = prev.findIndex(r =>
+        (r.fichaId === itemFinal.fichaId || (r.fichaNumero && r.fichaNumero === itemFinal.fichaNumero)) &&
+        r.competenciaCodigo === itemFinal.competenciaCodigo &&
+        r.rapCodigo === itemFinal.rapCodigo
+      );
+      if (idx >= 0) {
+        const copia = [...prev];
+        copia[idx] = { ...copia[idx], ...itemFinal };
+        return copia;
+      }
+      return [...prev, itemFinal];
+    });
+
+    upsertRapSeguimientoInSupabase(itemFinal).catch(err => {
+      console.error('Error al sincronizar seguimiento de RAP en Supabase:', err);
+    });
+
+    registrarLog(
+      'ACTUALIZAR_RAP_SEGUIMIENTO',
+      'Seguimiento Curricular',
+      `RAP ${itemActualizado.rapCodigo} de Ficha ${itemActualizado.fichaNumero || selectedFicha?.numero_ficha} actualizado a estado ${itemActualizado.estado} (Instructor: ${itemActualizado.instructorNombre || 'Sin asignar'})`
+    );
+  };
+
+  // Manejo de Seguimiento
+  const handleUpdateEstado = (actividadId: string, nuevoEstado: EstadoActividad) => {
+    // Se captura la actividad ya actualizada para poder sincronizarla con Supabase justo
+    // debajo (antes este cambio de estado solo vivía en memoria: se perdía al recargar).
+    let actividadActualizada: ActividadSeguimiento | undefined;
+    setActividades(prev => prev.map(a => {
+      if (a.id === actividadId) {
+        actividadActualizada = {
+          ...a,
+          estado: nuevoEstado,
+          fechaUltimaActualizacion: new Date().toLocaleDateString()
+        };
+        return actividadActualizada;
+      }
+      return a;
+    }));
+
+    if (actividadActualizada) {
+      upsertActividadSeguimientoInSupabase(actividadActualizada).catch(err => {
+        console.error('Error al sincronizar actividad de seguimiento en Supabase:', err);
+      });
+    }
+
+    registrarLog(
+      'ACTUALIZAR_ESTADO_ACTIVIDAD',
+      'Seguimiento Curricular',
+      `Actividad ${actividadId} actualizada a estado ${nuevoEstado} por ${currentUser.nombre_completo}`
+    );
+  };
+
+  // Manejo de Ingesta
+  const handleProcesarIngesta = (
+    archivoNombre: string, 
+    tipo: AuditoriaIngesta['tipoPlantilla'], 
+    filas: number
+  ) => {
+    const nuevaAuditoria: AuditoriaIngesta = {
+      id: `ing_${Date.now()}`,
+      fechaHora: new Date().toLocaleString(),
+      archivoNombre,
+      tipoPlantilla: tipo,
+      moduloDestino: tipo === 'Estructura de Horarios' ? 'Programación de Horarios' : 'Seguimiento Curricular',
+      registrosProcesados: filas,
+      operadorNombre: currentUser.nombre_completo,
+      operadorRol: currentUser.rol,
+      estado: 'Integrado con Éxito',
+      detallesForwardFill: Math.min(Math.floor(filas * 0.3), 15)
+    };
+
+    setAuditoriaIngestas(prev => [nuevaAuditoria, ...prev]);
+    registrarLog(
+      'INGESTA_EXCEL_EXITOSA', 
+      'Ingesta de Archivos Excel', 
+      `Archivo ${archivoNombre} procesado (${filas} filas) por ${currentUser.nombre_completo}`
+    );
+  };
+
+  const handleLimpiarCola = () => {
+    setAuditoriaIngestas([]);
+    registrarLog('LIMPIAR_COLA_INGESTA', 'Ingesta de Archivos Excel', 'Cola de importación limpiada');
+  };
+
+  // Manejo de Cierre de Ficha
+  const handleActualizarBalance = (
+    fichaId: string, 
+    culminados: number, 
+    cancelados: number, 
+    aplazados: number, 
+    retiros: number
+  ) => {
+    const matricula = selectedFicha?.matriculaInicial || 35;
+    const retencion = Number(((culminados / matricula) * 100).toFixed(1));
+    const desercion = Number((((cancelados + retiros) / matricula) * 100).toFixed(1));
+
+    setFichas(prev => prev.map(f => {
+      if (f.id === fichaId) {
+        return {
+          ...f,
+          aprendicesCulminados: culminados,
+          aprendicesCancelados: cancelados,
+          aprendicesAplazados: aplazados,
+          aprendicesRetiroVoluntario: retiros,
+          tasaRetencion: retencion,
+          tasaDesercion: desercion,
+          estado: 'CERRADA'
+        };
+      }
+      return f;
+    }));
+
+    setSelectedFicha(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        aprendicesCulminados: culminados,
+        aprendicesCancelados: cancelados,
+        aprendicesAplazados: aplazados,
+        aprendicesRetiroVoluntario: retiros,
+        tasaRetencion: retencion,
+        tasaDesercion: desercion,
+        estado: 'CERRADA'
+      };
+    });
+
+    const numFicha = selectedFicha ? selectedFicha.numero_ficha : 'N/A';
+    registrarLog(
+      'CONSOLIDACION_CIERRE_FICHA', 
+      'Cierres e Indicadores', 
+      `Cierre formal consolidado para Ficha ${numFicha}. Retención: ${retencion}%, Deserción: ${desercion}%`
+    );
+  };
+
+  // Funciones de Base de Datos
+  const handleSeedDatabase = () => {
+    setFichas(FICHAS_INICIALES);
+    setSelectedFicha(null);
+    setInstructores(INSTRUCTORES_INICIALES);
+    setUsuarios(USUARIOS_INICIALES);
+    setActividades(ACTIVIDADES_SEGUIMIENTO_INICIALES);
+    setHorarios(BLOQUES_HORARIOS_INICIALES);
+    setAuditoriaIngestas(AUDITORIA_INGESTAS_INICIALES);
+    setAuditoriaSistema(AUDITORIA_SISTEMA_INICIAL);
+    localStorage.removeItem('sena_fichas_reales');
+    localStorage.removeItem('sena_instructores_reales');
+    localStorage.removeItem('sena_usuarios_registrados');
+    alert('¡Base de datos restablecida a la configuración limpia para datos reales!');
+  };
+
+  const handleLimpiarDatabase = () => {
+    if (confirm('¿Desea purgar los datos de prueba y auditoría? (No altera esquemas)')) {
+      setAuditoriaIngestas([]);
+      setAuditoriaSistema([]);
+      alert('¡Registros temporales y colas de auditoría depurados!');
+    }
+  };
+
+  // Breadcrumbs dinámicos
+  const getBreadcrumbs = () => {
+    const list = ['Gestión Académica'];
+    if (activeTab === 'dashboard') list.push('Panel Principal');
+    else if (activeTab === 'avance-fichas') list.push('Avance de Fichas');
+    else if (activeTab === 'horarios') list.push('Programación de Horarios');
+    else if (activeTab === 'reportes') list.push('Reportes');
+    else if (activeTab === 'seguimiento') list.push('Seguimiento Curricular');
+    else if (activeTab === 'programas') list.push('Programas de Formación');
+    else if (activeTab === 'competencias') list.push('Competencias y RAPs');
+    else if (activeTab === 'instructores') list.push('Directorio de Instructores');
+    else if (activeTab === 'ingesta') list.push('Ingesta de Archivos Excel');
+    else if (activeTab === 'cierres') list.push('Cierres e Indicadores');
+    else if (activeTab === 'parametrizaciones') list.push('Parametrizaciones y Tablas');
+    else if (activeTab === 'admin') list.push('Auditoría y Mantenimiento');
+    return list;
+  };
+
+  // Filtrado RBAC para Instructor Líder: solo ve y gestiona sus fichas asignadas
+  const fichasVisibles = React.useMemo(() => {
+    if (currentUser.rol === 'INSTRUCTOR_LIDER') {
+      return fichas.filter(f => 
+        f.instructorLiderId === currentUser.id ||
+        f.id === currentUser.fichaAsignadaId ||
+        (f.instructorLiderEmail && f.instructorLiderEmail.toLowerCase() === currentUser.correo.toLowerCase())
+      );
+    }
+    return fichas;
+  }, [fichas, currentUser]);
+
+  if (!isAuthenticated) {
+    return (
+      <LoginView
+        usuariosDisponibles={usuarios}
+        onLoginSuccess={handleLoginSuccess}
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-screen bg-[#F9F9FF] font-sans antialiased text-[#111C2D] overflow-hidden">
+      {/* Barra Lateral de Navegación con Roles RBAC, Modo Retráctil y Menú Móvil */}
+      <Sidebar
+        currentUser={currentUser}
+        onSwitchUser={handleSwitchUser}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        centro={centro}
+        fichas={fichasVisibles}
+        selectedFicha={selectedFicha}
+        onSelectFicha={setSelectedFicha}
+        usersList={usuarios}
+        onOpenModalCrearFicha={() => setIsModalFichaOpen(true)}
+        onOpenModalCrearInstructor={handleOpenCrearInstructor}
+        onOpenModalCrearPrograma={handleOpenCrearPrograma}
+        onOpenStandaloneModal={() => setIsModalStandaloneOpen(true)}
+        onLogout={handleLogout}
+        isCollapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebarCollapse}
+        isMobileOpen={mobileMenuOpen}
+        onCloseMobile={() => setMobileMenuOpen(false)}
+      />
+
+      {/* Contenedor Principal Adaptable */}
+      <div className="flex-1 flex flex-col h-screen overflow-hidden min-w-0">
+        <Header
+          currentUser={currentUser}
+          centro={centro}
+          fichas={fichasVisibles}
+          selectedFicha={selectedFicha}
+          onSelectFicha={setSelectedFicha}
+          breadcrumbs={getBreadcrumbs()}
+          unreadAlertsCount={3}
+          onOpenAlerts={() => setActiveTab('dashboard')}
+          onOpenModalCrearFicha={() => setIsModalFichaOpen(true)}
+          onOpenSupabaseModal={() => setIsModalSupabaseOpen(true)}
+          onOpenEditarPrograma={handleOpenEditarProgramaFichaActiva}
+          onOpenStandaloneModal={() => setIsModalStandaloneOpen(true)}
+          onLogout={handleLogout}
+          onToggleMobileMenu={() => setMobileMenuOpen(prev => !prev)}
+          onToggleSidebarCollapse={toggleSidebarCollapse}
+          isSidebarCollapsed={sidebarCollapsed}
+        />
+
+        {/* Zona de Trabajo con Scroll y Padding Responsivo */}
+        <main className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6 max-w-7xl w-full mx-auto min-w-0">
+          {activeTab === 'dashboard' && (
+            <DashboardView
+              currentUser={currentUser}
+              ficha={selectedFicha}
+              allFichas={fichasVisibles}
+              onNavigateTab={setActiveTab}
+              onSelectFicha={setSelectedFicha}
+              horarios={horarios}
+              actividades={actividades}
+              centro={centro}
+              rapsSeguimiento={rapsSeguimiento}
+              raps={raps}
+              trimestresCalendario={trimestresCalendario}
+              onOpenModalCrearFicha={() => setIsModalFichaOpen(true)}
+              onOpenEditarPrograma={handleOpenEditarProgramaFichaActiva}
+            />
+          )}
+
+          {activeTab === 'avance-fichas' && (
+            <AvanceFichasView
+              currentUser={currentUser}
+              fichas={fichasVisibles}
+              selectedFicha={selectedFicha}
+              onSelectFicha={setSelectedFicha}
+              onNavigateTab={setActiveTab}
+              centro={centro}
+              horarios={horarios}
+              actividades={actividades}
+              reportesJuicios={reportesJuicios}
+              rapsSeguimiento={rapsSeguimiento}
+              raps={raps}
+              trimestresCalendario={trimestresCalendario}
+              onGuardarJuiciosEvaluativos={handleGuardarJuiciosEvaluativos}
+              onEliminarFicha={handleEliminarFicha}
+              onOpenCrearFicha={() => setIsModalFichaOpen(true)}
+              onEditarFicha={handleEditarFicha}
+            />
+          )}
+
+          {activeTab === 'horarios' && (
+            <HorariosView
+              currentUser={currentUser}
+              ficha={selectedFicha}
+              allFichas={fichasVisibles}
+              instructores={instructores}
+              horarios={horarios}
+              competencias={competencias}
+              raps={raps}
+              rapsSeguimiento={rapsSeguimiento}
+              onGuardarBloque={handleGuardarBloque}
+              onEliminarBloque={handleEliminarBloque}
+              onQuitarInstructorDeBloque={handleQuitarInstructorDeBloque}
+              onAsignarInstructorABloque={handleAsignarInstructorABloque}
+              onNavigateToCompetencias={(progCodigo) => {
+                if (progCodigo) setSelectedProgramaForCompetencias(progCodigo);
+                setActiveTab('competencias');
+              }}
+              onSelectFicha={setSelectedFicha}
+              onNavigateToReportesInstructores={() => setActiveTab('reportes')}
+            />
+          )}
+
+          {activeTab === 'reportes' && (
+            <ReportesView
+              currentUser={currentUser}
+              instructores={instructores}
+              horarios={horarios}
+              allFichas={fichasVisibles}
+            />
+          )}
+
+          {activeTab === 'seguimiento' && (
+            <SeguimientoView
+              currentUser={currentUser}
+              ficha={selectedFicha}
+              allFichas={fichasVisibles}
+              actividades={actividades}
+              instructores={instructores}
+              competencias={competencias}
+              raps={raps}
+              registrosHorasEjecutadas={registrosHorasEjecutadas}
+              horarios={horarios}
+              reportesJuicios={reportesJuicios}
+              rapsSeguimiento={rapsSeguimiento}
+              onUpdateEstado={handleUpdateEstado}
+              onActualizarRapSeguimiento={handleActualizarRapSeguimiento}
+              onSelectFicha={setSelectedFicha}
+              onNavigateToHorarios={() => setActiveTab('horarios')}
+            />
+          )}
+
+          {activeTab === 'programas' && (
+            <ProgramasView
+              currentUser={currentUser}
+              programas={programas}
+              fichas={fichasVisibles}
+              onOpenEditarPrograma={handleOpenEditarPrograma}
+              onOpenCrearPrograma={handleOpenCrearPrograma}
+              onVerCompetencias={(progCodigo) => {
+                setSelectedProgramaForCompetencias(progCodigo);
+                setActiveTab('competencias');
+              }}
+              onEliminarPrograma={handleEliminarPrograma}
+            />
+          )}
+
+          {activeTab === 'competencias' && (
+            <CompetenciasView
+              currentUser={currentUser}
+              programas={programas}
+              competencias={competencias}
+              raps={raps}
+              registrosArchivoSeguimiento={registrosArchivoSeguimiento}
+              fichas={fichasVisibles}
+              horarios={horarios}
+              actividadesSeguimiento={actividades}
+              registrosHorasEjecutadas={registrosHorasEjecutadas}
+              selectedProgramaCodigo={selectedProgramaForCompetencias}
+              onSelectPrograma={(cod) => setSelectedProgramaForCompetencias(cod)}
+              onActualizarCompetenciasYRaps={handleActualizarCompetenciasYRaps}
+              onLimpiarEstructura={handleLimpiarEstructura}
+              onNavigateToHorarios={(progCodigo) => {
+                const fichaDelProg = fichasVisibles.find(f => f.programaCodigo === progCodigo);
+                if (fichaDelProg) {
+                  setSelectedFicha(fichaDelProg);
+                }
+                setActiveTab('horarios');
+              }}
+            />
+          )}
+
+          {activeTab === 'instructores' && (
+            <InstructoresView
+              currentUser={currentUser}
+              instructores={instructores}
+              fichas={fichasVisibles}
+              horarios={horarios}
+              actividades={actividades}
+              registrosHorasEjecutadas={registrosHorasEjecutadas}
+              onOpenModalCrear={handleOpenCrearInstructor}
+              onEditarInstructor={handleOpenEditarInstructor}
+              onToggleEstado={handleToggleEstadoInstructor}
+              onEliminarInstructor={handleEliminarInstructor}
+              onSincronizarSupabase={sincronizarDatosDesdeSupabase}
+              isSyncing={isSyncingSupabase}
+            />
+          )}
+
+          {activeTab === 'ingesta' && (
+            <IngestaView
+              currentUser={currentUser}
+              ficha={selectedFicha}
+              programas={programas}
+              competenciasExistentes={competencias}
+              rapsExistentes={raps}
+              horarios={horarios}
+              actividadesSeguimiento={actividades}
+              registrosHorasEjecutadas={registrosHorasEjecutadas}
+              fichas={fichasVisibles}
+              auditoriaIngestas={auditoriaIngestas}
+              onProcesarIngesta={handleProcesarIngesta}
+              onActualizarCompetenciasYRaps={handleActualizarCompetenciasYRaps}
+              onGuardarHorasEjecutadas={handleGuardarHorasEjecutadas}
+              onGuardarJuiciosEvaluativos={handleGuardarJuiciosEvaluativos}
+              onLimpiarEstructura={handleLimpiarEstructura}
+              onLimpiarCola={handleLimpiarCola}
+              onNavigateToCompetencias={(progCodigo) => {
+                if (progCodigo) setSelectedProgramaForCompetencias(progCodigo);
+                setActiveTab('competencias');
+              }}
+              onNavigateToSeguimiento={() => setActiveTab('seguimiento')}
+            />
+          )}
+
+          {activeTab === 'cierres' && (
+            <CierresView
+              currentUser={currentUser}
+              ficha={selectedFicha}
+              allFichas={fichasVisibles}
+              centro={centro}
+              onActualizarBalance={handleActualizarBalance}
+            />
+          )}
+
+          {activeTab === 'parametrizaciones' && (
+            <ParametrizacionesView
+              currentUser={currentUser}
+              centro={centro}
+              competencias={competencias}
+              instructores={instructores}
+              especialidades={especialidades}
+              ambientes={ambientes}
+              onGuardarEspecialidad={handleGuardarEspecialidad}
+              onEliminarEspecialidad={handleEliminarEspecialidad}
+              onAutoGenerarEspecialidades={handleAutoGenerarEspecialidades}
+              onGuardarAmbiente={handleGuardarAmbiente}
+              onEliminarAmbiente={handleEliminarAmbiente}
+              trimestresCalendario={trimestresCalendario}
+              onGuardarTrimestreCalendario={handleGuardarTrimestreCalendario}
+              onEliminarTrimestreCalendario={handleEliminarTrimestreCalendario}
+            />
+          )}
+
+          {activeTab === 'admin' && (
+            <AdminView
+              currentUser={currentUser}
+              usersList={usuarios}
+              logs={auditoriaSistema}
+              centro={centro}
+              onSeedDatabase={handleSeedDatabase}
+              onLimpiarDatabase={handleLimpiarDatabase}
+              onCrearUsuario={handleCrearUsuario}
+              onEliminarUsuario={handleEliminarUsuario}
+            />
+          )}
+        </main>
+      </div>
+
+      {/* Modal de Creación Manual de Ficha */}
+      <ModalCrearFicha
+        isOpen={isModalFichaOpen}
+        onClose={() => { setIsModalFichaOpen(false); setFichaParaEditar(null); }}
+        instructores={instructores}
+        onCrearFicha={handleCrearFicha}
+        onActualizarFicha={handleActualizarFicha}
+        onRegistrarInstructor={handleGuardarInstructor}
+        programas={programas}
+        ambientes={ambientes}
+        fichaEditar={fichaParaEditar}
+      />
+
+      {/* Modal de Creación y Edición de Instructor */}
+      <ModalCrearInstructor
+        isOpen={isModalInstructorOpen}
+        onClose={() => {
+          setIsModalInstructorOpen(false);
+          setInstructorParaEditar(null);
+        }}
+        instructorParaEditar={instructorParaEditar}
+        especialidadesDisponibles={especialidades}
+        onGuardarInstructor={handleGuardarInstructor}
+      />
+
+      {/* Modal de Edición y Creación de Programas de Formación */}
+      <ModalEditarPrograma
+        isOpen={isModalProgramaOpen}
+        onClose={() => setIsModalProgramaOpen(false)}
+        programa={programaParaEditar}
+        fichas={fichas}
+        onGuardarPrograma={handleGuardarPrograma}
+      />
+
+      {/* Modal de Guía y Diagnóstico de Supabase */}
+      <ModalSupabaseGuia
+        isOpen={isModalSupabaseOpen}
+        onClose={() => setIsModalSupabaseOpen(false)}
+      />
+
+      {/* Modal de Descarga de Versión Standalone para GitHub */}
+      <DescargarStandaloneModal
+        isOpen={isModalStandaloneOpen}
+        onClose={() => setIsModalStandaloneOpen(false)}
+      />
+    </div>
+  );
+}

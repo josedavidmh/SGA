@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cruce de RAPs — Ficha 3490507</title>
+<style>
+  :root {
+    --verde: #0D631B;
+    --verde-suave: #E8F5E9;
+    --ambar: #92400E;
+    --ambar-suave: #FEF3C7;
+    --gris-texto: #334155;
+    --gris-suave: #F8FAFC;
+    --borde: #E2E8F0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #F1F5F9;
+    color: var(--gris-texto);
+    margin: 0;
+    padding: 32px 16px;
+    line-height: 1.5;
+  }
+  .container {
+    max-width: 920px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }
+  .header {
+    background: linear-gradient(135deg, #0D631B, #0a4d15);
+    color: #fff;
+    padding: 28px 32px;
+  }
+  .header h1 {
+    margin: 0 0 6px 0;
+    font-size: 22px;
+    font-weight: 800;
+  }
+  .header p {
+    margin: 2px 0;
+    font-size: 13px;
+    opacity: 0.92;
+  }
+  .content { padding: 28px 32px 36px 32px; }
+  h2 {
+    font-size: 16px;
+    font-weight: 800;
+    color: #111C2D;
+    margin-top: 34px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--borde);
+  }
+  h2:first-child { margin-top: 0; }
+  .resumen-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .stat {
+    background: var(--gris-suave);
+    border: 1px solid var(--borde);
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .stat .num { font-size: 24px; font-weight: 900; color: #111C2D; }
+  .stat .label { font-size: 11px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.03em; margin-top: 2px; }
+  .stat.ok .num { color: var(--verde); }
+  .stat.pendiente .num { color: var(--ambar); }
+  .stat.fuera .num { color: #64748B; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 8px 0;
+    font-size: 13px;
+  }
+  th {
+    background: var(--gris-suave);
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748B;
+    border-bottom: 2px solid var(--borde);
+  }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--borde);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  .codigo { font-family: ui-monospace, monospace; font-weight: 700; color: #0D631B; white-space: nowrap; }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 800;
+    padding: 3px 10px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .badge.pendiente { background: var(--ambar-suave); color: var(--ambar); }
+  .badge.fuera { background: #E2E8F0; color: #475569; }
+  .callout {
+    background: var(--ambar-suave);
+    border: 1px solid #FDE68A;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 13px;
+    color: #78350F;
+    margin: 12px 0 4px 0;
+  }
+  .competencia-titulo {
+    font-weight: 800;
+    color: #111C2D;
+    font-size: 14px;
+    margin: 18px 0 2px 0;
+  }
+  .footer-note {
+    font-size: 12px;
+    color: #94A3B8;
+    margin-top: 28px;
+    padding-top: 16px;
+    border-top: 1px solid var(--borde);
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>Cruce de Competencias y RAPs — Planeación Pedagógica vs. Juicios Evaluativos SofiaPlus</h1>
+    <p><strong>Ficha:</strong> 3490507 &nbsp;·&nbsp; <strong>Programa:</strong> Análisis y Desarrollo de Software (228118, versión 1.0)</p>
+    <p>Archivos: <code>planeacion_pedagogica_adso_cargue.csv</code> vs. <code>Reporte_de_Juicios_Evaluativos_3490507.xls</code></p>
+  </div>
+
+  <div class="content">
+    <p>Este documento lista únicamente las competencias y RAPs que presentan alguna diferencia entre lo cargado en Planeación Pedagógica y el archivo oficial de Juicios Evaluativos de SofiaPlus. Lo que coincide exacto (66 de 75 RAPs, 18 de 19 competencias) no se incluye por no requerir ninguna acción.</p>
+
+    <div class="resumen-grid">
+      <div class="stat ok">
+        <div class="num">66</div>
+        <div class="label">RAPs con coincidencia exacta</div>
+      </div>
+      <div class="stat ok">
+        <div class="num">4</div>
+        <div class="label">Coincidencia automática segura</div>
+      </div>
+      <div class="stat pendiente">
+        <div class="num">4</div>
+        <div class="label">Competencia OK, RAP pendiente</div>
+      </div>
+      <div class="stat fuera">
+        <div class="num">1</div>
+        <div class="label">Fuera de alcance (Etapa Práctica)</div>
+      </div>
+    </div>
+
+    <h2>1. RAPs con diferencia de redacción menor</h2>
+    <p style="font-size:13px; color:#64748B; margin-top:-4px;">No requieren ninguna acción — el sistema ya los identifica automáticamente como el mismo RAP.</p>
+    <table>
+      <thead>
+        <tr><th style="width:90px;">Código</th><th>Texto en SofiaPlus (Juicios)</th><th>Texto en Planeación Pedagógica</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="codigo">593060</td>
+          <td>Definir especificaciones técnicas del software de acuerdo con las características del software a construir.</td>
+          <td>Definir especificaciones técnicas de acuerdo con las características de la solución de software.</td>
+        </tr>
+        <tr>
+          <td class="codigo">593111</td>
+          <td>Planear actividades de implantación del software de acuerdo con las condiciones del sistema.</td>
+          <td>Planear actividades de implantación del software de acuerdo con las condiciones de la solución informática.</td>
+        </tr>
+        <tr>
+          <td class="codigo">593100</td>
+          <td>Determinar las características técnicas de la interfaz gráfica...</td>
+          <td>Determinar las características técnicas de la interfaz gráfica del software adoptado...</td>
+        </tr>
+        <tr>
+          <td class="codigo">593159</td>
+          <td>Solucionar problemas asociados con el sector productivo con base en los principios y leyes de la física.</td>
+          <td>Solucionar problemas asociados con el sector productivos con base en los principios y leyes de la física.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>2. Competencia que coincide, pero sus RAPs no se pueden identificar uno a uno</h2>
+    <div class="competencia-titulo">"Ejercer derechos fundamentales del trabajo en el marco de la constitución política y los convenios internacionales" <span class="codigo">(38558)</span></div>
+    <p style="font-size:13px; color:#64748B; margin-top:2px;">La competencia sí está en tu catálogo de Planeación Pedagógica con sus 4 RAPs, pero el texto de cada RAP está redactado de forma tan distinta entre los dos archivos que el sistema no puede emparejarlos uno a uno con confianza.</p>
+    <table>
+      <thead>
+        <tr><th style="width:26px;">#</th><th>RAP en SofiaPlus (Juicios)</th><th>RAP en Planeación Pedagógica (CSV)</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td><span class="codigo">593243</span> — Reconocer el trabajo como factor de movilidad social y transformación vital con referencia a la fenomenología y a los derechos fundamentales en el trabajo.</td>
+          <td>Reconocer los derechos fundamentales del trabajo y su importancia en la sociedad.</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><span class="codigo">593245</span> — Valorar la importancia de la ciudadanía laboral con base en el estudio de los derechos humanos y fundamentales en el trabajo.</td>
+          <td>Debatir sobre Derecho de Negociación Colectiva, agentes, reconocimiento de la asociación para resolver problemas.</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><span class="codigo">593244</span> — Practicar los derechos fundamentales en el trabajo de acuerdo con la Constitución Política y los Convenios Internacionales.</td>
+          <td>Analizar la relación entre el trabajo y el desarrollo humano.</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><span class="codigo">593246</span> — Participar en acciones solidarias teniendo en cuenta el ejercicio de los derechos humanos, de los pueblos y de la naturaleza.</td>
+          <td>Desarrollar una campaña orientada a la defensa de los recursos naturales donde esté involucrada una comunidad.</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="callout">
+      <span class="badge pendiente">Pendiente</span>&nbsp; El orden de la tabla es solo el orden en que aparece cada RAP en su propio archivo — no es un emparejamiento confirmado. Hasta que verifiques en SofiaPlus cuál texto corresponde a cuál, el sistema no vinculará estos 4 RAPs automáticamente ni sobrescribirá nada en Seguimiento para ellos.
+    </div>
+
+    <h2>3. RAP fuera de alcance</h2>
+    <table>
+      <thead>
+        <tr><th style="width:90px;">Código</th><th>Texto</th><th style="width:180px;">Motivo</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="codigo">590803</td>
+          <td>Aplicar en la resolución de problemas reales del sector productivo, los conocimientos, habilidades y destrezas pertinentes a las competencias del programa de formación asumiendo estrategias y metodologías de autogestión.</td>
+          <td><span class="badge fuera">Etapa Práctica</span><br><span style="font-size:12px; color:#64748B;">El sistema está diseñado para la etapa lectiva por ahora — no es un vacío de datos.</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="footer-note">Generado a partir del cruce entre el archivo de Planeación Pedagógica cargado y el reporte oficial de Juicios Evaluativos de SofiaPlus para esta ficha.</div>
+  </div>
+</div>
+</body>
+</html>

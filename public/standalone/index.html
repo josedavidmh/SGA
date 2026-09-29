@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SENA CBC - Gestión Académica, Horarios y Fichas (Standalone)</title>
+  <meta name="description" content="Sistema de Gestión Académica y Programación Horaria - Centro Biotecnológico del Caribe SENA Regional Cesar" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ====================================================================
+       1. PANTALLA DE INICIO DE SESIÓN (LOGIN)
+       ==================================================================== -->
+  <div id="login-screen" class="login-screen-wrapper">
+    <div class="login-card">
+      <!-- Encabezado Institucional -->
+      <div class="login-brand-header">
+        <div class="login-logo-badge">S</div>
+        <div class="login-title-box">
+          <h1>SENA Regional Cesar</h1>
+          <p>Centro Biotecnológico del Caribe • CBC (9211)</p>
+        </div>
+      </div>
+
+      <!-- Alerta de Error de Autenticación -->
+      <div id="login-error" class="login-error-alert" style="display: none;">
+        <span>Credenciales no válidas. Verifique el usuario o clave ingresada.</span>
+      </div>
+
+      <!-- Formulario de Autenticación -->
+      <form id="form-login" onsubmit="handleLoginSubmit(event)">
+        <div class="form-group">
+          <label class="form-label" for="login-email">Correo Institucional</label>
+          <div class="input-with-icon">
+            <span class="input-icon-left">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+            </span>
+            <input 
+              type="email" 
+              id="login-email" 
+              class="input-field" 
+              placeholder="ejemplo@misena.edu.co" 
+              required 
+            />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="login-password">Clave de Acceso</label>
+          <div class="input-with-icon">
+            <span class="input-icon-left">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </span>
+            <input 
+              type="password" 
+              id="login-password" 
+              class="input-field" 
+              placeholder="••••••••••••" 
+              required 
+            />
+            <button 
+              type="button" 
+              class="btn-toggle-password" 
+              onclick="togglePasswordVisibility()" 
+              title="Mostrar / Ocultar Contraseña"
+            >
+              <svg id="eye-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-options">
+          <label class="checkbox-label">
+            <input type="checkbox" id="remember-me" checked />
+            <span>Recordar sesión</span>
+          </label>
+          <span style="color: #64748b; font-size: 11px;">CBC Valledupar</span>
+        </div>
+
+        <button type="submit" class="btn-submit-login" id="btn-login-submit">
+          <span>Ingresar al Sistema</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </button>
+      </form>
+
+      <!-- Botón Desplegable de Credenciales de Prueba (1-Clic) -->
+      <div class="seed-users-toggle-box">
+        <button 
+          type="button" 
+          class="btn-seed-dropdown-toggle" 
+          onclick="toggleSeedUsersList()"
+        >
+          <span>🔑 Credenciales Semilla para Pruebas (Roles)</span>
+          <span id="seed-toggle-arrow">▼</span>
+        </button>
+
+        <div id="seed-users-list" class="seed-buttons-list" style="display: none;">
+          <!-- Inyectado dinámicamente desde app.js -->
+        </div>
+      </div>
+
+      <!-- Pie de Tarjeta -->
+      <div class="login-card-footer">
+        <span>🛡️ Acceso por Roles (RBAC SENA)</span>
+        <span>Año 2026</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================
+       2. APLICACIÓN PRINCIPAL (SISTEMA DE GESTIÓN ACADÉMICA)
+       ==================================================================== -->
+  <div id="app-screen" class="app-container" style="display: none;">
+    <!-- Barra Lateral (Sidebar) -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="sena-badge">SENA</div>
+        <div class="sidebar-title">
+          <h2>Centro Biotecnológico</h2>
+          <p>Regional Cesar (9211)</p>
+        </div>
+      </div>
+
+      <!-- Navegación -->
+      <nav class="sidebar-nav">
+        <button id="nav-dashboard" class="nav-item active" onclick="setTab('dashboard')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+          <span>Dashboard</span>
+        </button>
+
+        <button id="nav-avance-fichas" class="nav-item" onclick="setTab('avance-fichas')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+          <span>Avance Fichas</span>
+        </button>
+
+        <button id="nav-horarios" class="nav-item" onclick="setTab('horarios')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
+          <span>Horarios</span>
+        </button>
+
+        <button id="nav-seguimiento" class="nav-item" onclick="setTab('seguimiento')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span>Seguimiento F001</span>
+        </button>
+
+        <button id="nav-usuarios" class="nav-item" onclick="setTab('usuarios')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>Usuarios Semilla</span>
+        </button>
+      </nav>
+
+      <!-- Pie de Barra con Usuario Activo y Cerrar Sesión -->
+      <div class="sidebar-footer">
+        <div class="user-card" onclick="abrirModalUsuarios()" style="cursor: pointer;" title="Clic para ver o cambiar de rol">
+          <div class="user-avatar" id="current-user-avatar">U</div>
+          <div class="user-info">
+            <div class="user-name" id="current-user-name">Cargando...</div>
+            <span class="user-role-tag" id="current-user-role">ROL</span>
+          </div>
+        </div>
+        <div style="margin-top: 10px; display: flex; justify-content: flex-end;">
+          <button class="logout-btn-header" onclick="cerrarSesion()" style="width: 100%; justify-content: center;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+            <span>Cerrar Sesión</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Contenido Principal -->
+    <main class="main-content">
+      <!-- Barra Superior -->
+      <header class="top-bar">
+        <div class="top-breadcrumbs" id="top-breadcrumb-title">
+          SENA CBC / Panel Principal
+        </div>
+        <div class="top-actions">
+          <button class="btn btn-outline" onclick="abrirModalUsuarios()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+            <span>Credenciales Semilla</span>
+          </button>
+          <button class="btn btn-primary" onclick="setTab('avance-fichas')">
+            <span>Ver Avance Fichas</span>
+          </button>
+          <button class="logout-btn-header" onclick="cerrarSesion()" title="Salir del sistema">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+            <span>Salir</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Vista Dinámica -->
+      <div class="content-body" id="view-container">
+        <!-- El contenido se inyecta dinámicamente mediante app.js -->
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

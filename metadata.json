@@ -1,0 +1,6 @@
+{
+  "name": "Sistema de Gestión Académica SENA",
+  "description": "Sistema de Gestión Académica y Curricular Integral SENA con programación de horarios sin colisiones, ingesta de Excel y reportes F001-008-25",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
