@@ -47,10 +47,13 @@ import {
   ResultadoAprendizaje,
   RapSeguimiento,
   RegistroHorasEjecutadas,
-  ActividadSeguimiento
+  ActividadSeguimiento,
+  AmbienteAprendizaje
 } from '../types';
+import { ambienteDelDia, ambienteEfectivo, buscarChoqueAmbiente, excepcionDelDia, origenAmbiente } from '../lib/ambientes';
 import { calcularComparativoCompetencias } from '../services/horasEjecutadasService';
 import { dialogo } from './DialogoSistema';
+import { ListaFichasConBuscador } from './ListaFichasConBuscador';
 import {
   exportarHorarioFichaExcel,
   exportarHorarioFichaPDF
@@ -75,6 +78,12 @@ interface HorariosProps {
   actividades?: ActividadSeguimiento[];
   /** Permiso de edición calculado en App (el instructor líder solo en sus fichas). */
   puedeEditar?: boolean;
+  /** Catálogo de ambientes (Parametrizaciones) para las excepciones. */
+  ambientesCatalogo?: AmbienteAprendizaje[];
+  /** TODAS las fichas (para detectar si un ambiente ya lo ocupa otra ficha). */
+  todasLasFichas?: Ficha[];
+  onCambiarAmbienteDia?: (fichaId: string, trimestre: string, dia: DiaSemana, ambiente: string | null) => { exito: boolean; mensaje: string };
+  onCambiarAmbienteBloque?: (bloqueId: string, ambiente: string | null) => { exito: boolean; mensaje: string };
   onNavigateToCompetencias?: (programaCodigo?: string) => void;
   onSelectFicha?: (ficha: Ficha) => void;
   onNavigateToReportesInstructores?: () => void;
@@ -163,6 +172,10 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   registrosHorasEjecutadas = [],
   actividades = [],
   puedeEditar,
+  ambientesCatalogo = [],
+  todasLasFichas,
+  onCambiarAmbienteDia,
+  onCambiarAmbienteBloque,
   onNavigateToCompetencias,
   onSelectFicha,
   onNavigateToReportesInstructores
@@ -392,32 +405,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
         </div>
 
         {allFichas && allFichas.length > 0 && onSelectFicha && (
-          <div className="pt-2 text-left">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 text-center">
-              Fichas Disponibles por Programa de Formación
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-64 overflow-y-auto p-1">
-              {allFichas.map(f => (
-                <button
-                  key={f.id}
-                  onClick={() => onSelectFicha(f)}
-                  className="p-3 rounded-xl bg-slate-50 hover:bg-[#E8F5E9] hover:border-[#C8E6C9] border border-slate-200 text-left transition-all group"
-                >
-                  {/* Se muestra PRIMERO el programa */}
-                  <div className="text-xs font-bold text-[#111C2D] group-hover:text-[#0D631B] truncate">
-                    {f.programaNombre}
-                  </div>
-                  <div className="flex items-center space-x-2 text-[11px] text-slate-500 mt-1">
-                    <span className="font-mono font-bold text-slate-700 bg-white px-1.5 py-0.2 rounded border border-slate-200">
-                      Ficha {f.numero_ficha}
-                    </span>
-                    <span>•</span>
-                    <span>{f.modalidad}</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
+          <ListaFichasConBuscador fichas={allFichas} onSelect={onSelectFicha} />
         )}
 
         <div className="pt-2 flex justify-center">
@@ -517,10 +505,21 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
         fichaNumero: fichaConflicto ? fichaConflicto.numero_ficha : 'Otra ficha',
         // Siempre el ambiente ACTUAL de esa otra ficha — nunca el que quedó
         // guardado en su bloque al crearlo, que puede estar desactualizado.
-        ambiente: fichaConflicto?.ambientePrincipal || asignacionExterna.ambiente
+        ambiente: ambienteEfectivo(asignacionExterna, fichaConflicto)
       };
     }
     return { hasConflicto: false, fichaNumero: '', ambiente: '' };
+  };
+
+  // Choque de AMBIENTE: otra ficha ya ocupa ese ambiente ese día/franja/trimestre.
+  const fichasParaAmbientes = todasLasFichas || allFichas;
+  const mensajeChoqueAmbiente = (dia: DiaSemana, franja: FranjaHorario, ambiente: string, excluirIds?: string[]): string | null => {
+    const choque = buscarChoqueAmbiente(horarios, fichasParaAmbientes, {
+      fichaId: ficha.id, trimestre: trimestreSeleccionado, dia, franja, ambiente, excluirIds
+    });
+    return choque
+      ? `¡AMBIENTE OCUPADO!\n${choque.ambiente} ya lo usa la ficha ${choque.fichaNumero} el ${dia} en la franja ${franja}.\nElige otra franja, u otro ambiente para este día.`
+      : null;
   };
 
   // Códigos de RAP que cubre un bloque (competencia completa o selección de RAPs)
@@ -559,6 +558,10 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
       return `No se puede ${modo === 'MOVER' ? 'mover' : 'pegar'} este bloque: ${rapEnTope.rapCodigo} ya tiene ${rapEnTope.horasProgramadas}h de ${rapEnTope.horasPlaneadas}h planeadas (${rapEnTope.porcentaje}%), dentro del rango institucional de cumplimiento (70%-100%).`;
     }
 
+    const ambienteDestino = bloque.ambienteEspecial || ambienteDelDia(ficha, trimestreSeleccionado, dia);
+    const choqueAmb = mensajeChoqueAmbiente(dia, franja, ambienteDestino, [bloque.id]);
+    if (choqueAmb) return choqueAmb;
+
     return null;
   };
 
@@ -574,7 +577,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
 
     const { id: _id, ...datosBloque } = bloque;
     onEliminarBloque(bloque.id);
-    onGuardarBloque({ ...datosBloque, diaSemana: dia, franja });
+    onGuardarBloque({ ...datosBloque, diaSemana: dia, franja, ambiente: bloque.ambienteEspecial || ambienteDelDia(ficha, trimestreSeleccionado, dia) });
     mostrarToast(`Bloque movido a ${dia} • ${franja}`);
   };
 
@@ -599,7 +602,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
       await avisarSiCompetenciaSobrepasada(bloqueCopiado.competenciaCodigo, bloqueCopiado.instructorNombre);
     }
     const { id: _id, ...datosBloque } = bloqueCopiado;
-    onGuardarBloque({ ...datosBloque, diaSemana: dia, franja });
+    onGuardarBloque({ ...datosBloque, diaSemana: dia, franja, ambiente: bloqueCopiado.ambienteEspecial || ambienteDelDia(ficha, trimestreSeleccionado, dia) });
     mostrarToast(`Bloque pegado en ${dia} • ${franja}`);
   };
 
@@ -702,10 +705,10 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
       fichaId: ficha.id,
       diaSemana: selectedDia,
       franja: selectedFranja,
-      // El ambiente SIEMPRE es el asignado a la ficha (Espacio Físico / Sede en
-      // el encabezado) — nunca uno propio del bloque, así se mantiene
-      // sincronizado aunque la ficha lo cambie después de crear el bloque.
-      ambiente: ficha.ambientePrincipal,
+      // Ambiente de la ficha para ESE día (su excepción del día, si la tiene,
+      // o el ambiente base). Una excepción de una sola franja se pone después
+      // desde el detalle del bloque.
+      ambiente: ambienteDelDia(ficha, trimestreSeleccionado || ficha.periodoLectivo, selectedDia),
       rapCodigo: rapCodigoResumen,
       rapTitulo: rapTituloResumen,
       competenciaCodigo: selectedCompetenciaCodigo,
@@ -766,6 +769,11 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
         `Ya tiene ${rapEnTope.horasProgramadas}h programadas de ${rapEnTope.horasPlaneadas}h planeadas ` +
         `(${rapEnTope.porcentaje}%), dentro del rango institucional de cumplimiento (70%-100%).`
       );
+      return;
+    }
+    const choqueAmbVac = mensajeChoqueAmbiente(selectedDia, selectedFranja, ambienteDelDia(ficha, trimestreSeleccionado, selectedDia));
+    if (choqueAmbVac) {
+      alert(choqueAmbVac);
       return;
     }
     onGuardarBloque({
@@ -855,6 +863,12 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
         `Este RAP no requiere más programación en Horarios. Si de verdad necesita más horas, ` +
         `revíselo primero en el módulo de Seguimiento.`
       );
+      return;
+    }
+
+    const choqueAmb = mensajeChoqueAmbiente(selectedDia, selectedFranja, ambienteDelDia(ficha, trimestreSeleccionado, selectedDia));
+    if (choqueAmb) {
+      alert(choqueAmb);
       return;
     }
 
@@ -957,6 +971,15 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
           <div className="text-xs font-bold text-[#111C2D] truncate" title={ficha.ambientePrincipal || ''}>
             {ficha.ambientePrincipal || 'Sin ambiente asignado'}
           </div>
+          {DIAS.some(d => excepcionDelDia(ficha, trimestreSeleccionado, d)) && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {DIAS.filter(d => excepcionDelDia(ficha, trimestreSeleccionado, d)).map(d => (
+                <span key={d} className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate max-w-full" title={`${d}: ${excepcionDelDia(ficha, trimestreSeleccionado, d)}`}>
+                  {d.slice(0, 3)} → {excepcionDelDia(ficha, trimestreSeleccionado, d)}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-xs">
@@ -1124,14 +1147,43 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                   <th className="sticky top-0 left-0 z-30 p-2.5 bg-slate-100 rounded-tl-xl text-center text-[11px] font-bold text-slate-500 uppercase tracking-wider w-24">
                     Horario
                   </th>
-                  {DIAS.map((d, i) => (
-                    <th
-                      key={d}
-                      className={`sticky top-0 z-20 p-2.5 bg-slate-100 text-center text-[11px] font-bold text-slate-700 ${i === DIAS.length - 1 ? 'rounded-tr-xl' : ''}`}
-                    >
-                      {d}
-                    </th>
-                  ))}
+                  {DIAS.map((d, i) => {
+                    const excepcion = excepcionDelDia(ficha, trimestreSeleccionado, d);
+                    return (
+                      <th
+                        key={d}
+                        className={`sticky top-0 z-20 p-2 bg-slate-100 text-center text-[11px] font-bold text-slate-700 align-top ${i === DIAS.length - 1 ? 'rounded-tr-xl' : ''}`}
+                      >
+                        <div>{d}</div>
+                        {/* Ambiente del día: el base de la ficha o una excepción */}
+                        {canEditHorarios && onCambiarAmbienteDia ? (
+                          <select
+                            value={excepcion || ''}
+                            onChange={(e) => {
+                              const valor = e.target.value || null;
+                              const r = onCambiarAmbienteDia(ficha.id, trimestreSeleccionado, d, valor);
+                              if (!r.exito) alert(r.mensaje); else mostrarToast(r.mensaje);
+                            }}
+                            className={`mt-1 w-full max-w-[150px] text-[9px] font-semibold rounded-md border px-1 py-0.5 focus:outline-none ${
+                              excepcion ? 'bg-violet-50 border-violet-300 text-violet-800' : 'bg-white border-slate-200 text-slate-500'
+                            }`}
+                            title={excepcion ? `Este día la ficha va a ${excepcion}` : 'Ambiente base de la ficha. Cámbialo si este día va a otro ambiente.'}
+                          >
+                            <option value="">{ficha.ambientePrincipal ? `Base: ${ficha.ambientePrincipal}` : 'Ambiente base'}</option>
+                            {ambientesCatalogo
+                              .filter(a => a.nombre && a.nombre !== ficha.ambientePrincipal)
+                              .map(a => (
+                                <option key={a.id} value={a.nombre} disabled={a.estado === 'EN_MANTENIMIENTO'}>
+                                  {a.nombre}{a.estado === 'EN_MANTENIMIENTO' ? ' (mantenimiento)' : ''}
+                                </option>
+                              ))}
+                          </select>
+                        ) : excepcion ? (
+                          <div className="mt-1 text-[9px] font-semibold text-violet-700 truncate" title={excepcion}>📍 {excepcion}</div>
+                        ) : null}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -1248,6 +1300,11 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                                   </div>
                                 )}
 
+                                {origenAmbiente(bloque, ficha) !== 'BASE' && (
+                                  <div className="mt-1 text-[9px] font-bold px-1 py-0.5 rounded bg-violet-50 text-violet-800 border border-violet-200 truncate" title={`Ambiente: ${ambienteEfectivo(bloque, ficha)}`}>
+                                    📍 {ambienteEfectivo(bloque, ficha)}
+                                  </div>
+                                )}
                                 {bloque.instructorId ? (
                                   <div className="text-[11px] text-slate-700 font-semibold mt-1 truncate">
                                     {bloque.instructorNombre}
@@ -1407,7 +1464,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
               Programar Instructor en Franja
             </h3>
             <p className="text-xs text-slate-500">
-              3 Horas Lectivas en {ficha.ambientePrincipal} • Seleccione la competencia y elija asignar la competencia completa o varios RAPs.
+              3 Horas Lectivas en {ambienteDelDia(ficha, trimestreSeleccionado, selectedDia)} • Seleccione la competencia y elija asignar la competencia completa o varios RAPs.
             </p>
           </div>
 
@@ -1844,9 +1901,43 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                 </div>
                 <div>
                   <span className="text-[10px] font-bold text-slate-400 block uppercase">Ambiente</span>
-                  {/* Siempre el ambiente ACTUAL de la ficha — nunca el que quedó
-                      guardado en el bloque, para que jamás se desincronicen. */}
-                  <div className="font-bold text-[#111C2D] mt-0.5">{ficha.ambientePrincipal}</div>
+                  {(() => {
+                    const actual = horarios.find(b => b.id === bloqueDetalleModal.id) || bloqueDetalleModal;
+                    const delDia = ambienteDelDia(ficha, actual.trimestre, actual.diaSemana);
+                    const origen = origenAmbiente(actual, ficha);
+                    if (!canEditHorarios || !onCambiarAmbienteBloque) {
+                      return (
+                        <div className="font-bold text-[#111C2D] mt-0.5">
+                          {ambienteEfectivo(actual, ficha)}
+                          {origen !== 'BASE' && <span className="ml-1 text-[10px] font-semibold text-violet-700">(excepción)</span>}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="mt-0.5 space-y-0.5">
+                        <select
+                          value={actual.ambienteEspecial || ''}
+                          onChange={(e) => {
+                            const r = onCambiarAmbienteBloque(actual.id, e.target.value || null);
+                            if (!r.exito) alert(r.mensaje); else mostrarToast(r.mensaje);
+                          }}
+                          className={`w-full text-xs font-bold rounded-lg border px-2 py-1 focus:outline-none ${
+                            actual.ambienteEspecial ? 'bg-violet-50 border-violet-300 text-violet-900' : 'bg-white border-slate-200 text-[#111C2D]'
+                          }`}
+                        >
+                          <option value="">{delDia || 'Ambiente de la ficha'}{origen === 'EXCEPCION_DIA' || excepcionDelDia(ficha, actual.trimestre, actual.diaSemana) ? ' (del día)' : ' (base)'}</option>
+                          {ambientesCatalogo
+                            .filter(a => a.nombre && a.nombre !== delDia)
+                            .map(a => (
+                              <option key={a.id} value={a.nombre} disabled={a.estado === 'EN_MANTENIMIENTO'}>
+                                {a.nombre}{a.estado === 'EN_MANTENIMIENTO' ? ' (mantenimiento)' : ''}
+                              </option>
+                            ))}
+                        </select>
+                        <span className="block text-[10px] text-slate-400">Solo esta franja. Para todo el día, usa el selector bajo el nombre del día.</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 

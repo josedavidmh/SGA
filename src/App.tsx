@@ -133,6 +133,7 @@ import {
   ProgramaFormacion,
   ActividadSeguimiento, 
   BloqueHorario, 
+  DiaSemana,
   AuditoriaIngesta, 
   AuditoriaSistema,
   EstadoActividad,
@@ -163,6 +164,9 @@ import {
 import { generarUuid } from './lib/id';
 import { esFichaDelLider, fichasPermitidas, puedeEditarHorarioDeFicha } from './lib/permisos';
 import { homologarInstructores } from './lib/nombresInstructor';
+import { ambienteDelDia, ambienteEfectivo, buscarChoqueAmbiente, claveExcepcionDia, normalizarAmbiente } from './lib/ambientes';
+
+const mismoAmbienteONombre = (a?: string, b?: string) => normalizarAmbiente(a) === normalizarAmbiente(b);
 import { esProvisionalVigente, restaurarAntesDeProvisional, fotoPrevia } from './lib/firmezaSeguimiento';
 
 export default function App() {
@@ -903,7 +907,8 @@ export default function App() {
                 tasaDesercion: fichaResuelta.tasaDesercion ?? local.tasaDesercion,
                 aprendicesCondicionados: fichaResuelta.aprendicesCondicionados ?? local.aprendicesCondicionados,
                 aprendicesTrasladados: fichaResuelta.aprendicesTrasladados ?? local.aprendicesTrasladados,
-                progresoCurricular: fichaResuelta.progresoCurricular ?? local.progresoCurricular ?? 0
+                progresoCurricular: fichaResuelta.progresoCurricular ?? local.progresoCurricular ?? 0,
+                ambientesExcepcion: fichaResuelta.ambientesExcepcion ?? local.ambientesExcepcion
               };
             } else {
               merged.push({
@@ -1953,12 +1958,102 @@ export default function App() {
     }
   };
 
+  // ---------------------------------------------------------------------
+  // AMBIENTES: base de la ficha + excepciones por día y por franja
+  // ---------------------------------------------------------------------
+  // Guarda en cada bloque de la ficha su ambiente REAL (así Supabase puede
+  // impedir que dos fichas ocupen el mismo ambiente a la misma hora).
+  const recalcularAmbientesDeBloques = (fichaFinal: Ficha, soloIds?: Set<string>) => {
+    const cambiados: BloqueHorario[] = [];
+    const nuevos = horariosRef.current.map(b => {
+      if (b.fichaId !== fichaFinal.id || (soloIds && !soloIds.has(b.id))) return b;
+      const amb = ambienteEfectivo(b, fichaFinal);
+      if (amb === b.ambiente) return b;
+      const nb = { ...b, ambiente: amb };
+      cambiados.push(nb);
+      return nb;
+    });
+    if (cambiados.length === 0) return;
+    setHorarios(nuevos);
+    (async () => {
+      for (const b of cambiados) {
+        const r = await updateHorarioInSupabase(b);
+        if (!r.success) console.error('No se pudo actualizar el ambiente del bloque en Supabase:', r.error);
+      }
+    })();
+  };
+
+  /** Excepción de ambiente para un día (null = volver al ambiente base). */
+  const handleCambiarAmbienteDia = (fichaId: string, trimestre: string, dia: DiaSemana, ambiente: string | null): { exito: boolean; mensaje: string } => {
+    const ficha = fichas.find(f => f.id === fichaId);
+    if (!ficha) return { exito: false, mensaje: 'No se encontró la ficha.' };
+    const excepciones = { ...(ficha.ambientesExcepcion || {}) };
+    const clave = claveExcepcionDia(trimestre, dia);
+    if (ambiente && !mismoAmbienteONombre(ambiente, ficha.ambientePrincipal)) excepciones[clave] = ambiente;
+    else delete excepciones[clave];
+    const fichaFinal: Ficha = { ...ficha, ambientesExcepcion: excepciones };
+
+    // Choques: los bloques de ese día (sin excepción propia) irían al nuevo ambiente.
+    const bloquesDelDia = horariosRef.current.filter(b => b.fichaId === fichaId && b.trimestre === trimestre && b.diaSemana === dia && !b.ambienteEspecial);
+    for (const b of bloquesDelDia) {
+      const nuevoAmb = ambienteEfectivo(b, fichaFinal);
+      const choque = buscarChoqueAmbiente(horariosRef.current, fichas, { fichaId, trimestre, dia, franja: b.franja, ambiente: nuevoAmb });
+      if (choque) {
+        return { exito: false, mensaje: `${nuevoAmb} ya está ocupado el ${dia} en la franja ${b.franja} por la ficha ${choque.fichaNumero}. Libera ese espacio o elige otro ambiente.` };
+      }
+    }
+
+    setFichas(prev => prev.map(f => f.id === fichaId ? fichaFinal : f));
+    setSelectedFicha(prev => prev && prev.id === fichaId ? fichaFinal : prev);
+    updateFichaInSupabase(fichaId, { ambientesExcepcion: excepciones }).then(r => {
+      if (!r.success) console.error('No se pudo guardar la excepción de ambiente en Supabase:', r.error);
+    });
+    recalcularAmbientesDeBloques(fichaFinal, new Set(bloquesDelDia.map(b => b.id)));
+    registrarLog(
+      'AMBIENTE_EXCEPCION_DIA',
+      'Programación de Horarios',
+      ambiente && excepciones[clave]
+        ? `Ficha ${ficha.numero_ficha}: el ${dia} (${trimestre}) va a ${ambiente}.`
+        : `Ficha ${ficha.numero_ficha}: el ${dia} (${trimestre}) vuelve a su ambiente base (${ficha.ambientePrincipal}).`
+    );
+    return { exito: true, mensaje: ambiente && excepciones[clave] ? `El ${dia} la ficha va a ${ambiente}.` : `El ${dia} vuelve al ambiente base.` };
+  };
+
+  /** Excepción de ambiente solo para un bloque (null = el del día/base). */
+  const handleCambiarAmbienteBloque = (bloqueId: string, ambiente: string | null): { exito: boolean; mensaje: string } => {
+    const bloque = horariosRef.current.find(b => b.id === bloqueId);
+    if (!bloque) return { exito: false, mensaje: 'No se encontró el bloque.' };
+    const ficha = fichas.find(f => f.id === bloque.fichaId);
+    const delDia = ambienteDelDia(ficha, bloque.trimestre, bloque.diaSemana);
+    const especial = ambiente && !mismoAmbienteONombre(ambiente, delDia) ? ambiente : undefined;
+    const provisional: BloqueHorario = { ...bloque, ambienteEspecial: especial };
+    const nuevoAmb = ambienteEfectivo(provisional, ficha);
+    const choque = buscarChoqueAmbiente(horariosRef.current, fichas, {
+      fichaId: bloque.fichaId, trimestre: bloque.trimestre, dia: bloque.diaSemana, franja: bloque.franja, ambiente: nuevoAmb
+    });
+    if (choque) {
+      return { exito: false, mensaje: `${nuevoAmb} ya está ocupado el ${bloque.diaSemana} en la franja ${bloque.franja} por la ficha ${choque.fichaNumero}.` };
+    }
+    const final: BloqueHorario = { ...provisional, ambiente: nuevoAmb };
+    setHorarios(prev => prev.map(b => b.id === bloqueId ? final : b));
+    updateHorarioInSupabase(final).then(r => {
+      if (!r.success) alert(`El cambio de ambiente quedó en pantalla, pero NO se guardó en Supabase:\n\n${r.error}`);
+    });
+    return { exito: true, mensaje: especial ? `Este bloque va a ${nuevoAmb}.` : 'Este bloque vuelve al ambiente del día.' };
+  };
+
   const handleEditarFicha = (ficha: Ficha) => {
     setFichaParaEditar(ficha);
     setIsModalFichaOpen(true);
   };
 
   const handleActualizarFicha = (fichaActualizada: Ficha) => {
+    // Si cambió el ambiente base, los bloques de la ficha que lo usan pasan
+    // al nuevo (los que tienen excepción de día o de franja no cambian).
+    const anterior = fichas.find(f => f.id === fichaActualizada.id);
+    if (anterior && (anterior.ambientePrincipal || '') !== (fichaActualizada.ambientePrincipal || '')) {
+      recalcularAmbientesDeBloques(fichaActualizada);
+    }
     setFichas(prev => prev.map(f => f.id === fichaActualizada.id ? fichaActualizada : f));
     if (selectedFicha?.id === fichaActualizada.id) {
       setSelectedFicha(fichaActualizada);
@@ -3271,6 +3366,10 @@ export default function App() {
               registrosHorasEjecutadas={registrosHorasEjecutadas}
               actividades={actividades}
               puedeEditar={puedeEditarHorarioDeFicha(selectedFicha, currentUser, instructores)}
+              ambientesCatalogo={ambientes}
+              todasLasFichas={fichas}
+              onCambiarAmbienteDia={handleCambiarAmbienteDia}
+              onCambiarAmbienteBloque={handleCambiarAmbienteBloque}
             />
           )}
 
@@ -3280,6 +3379,7 @@ export default function App() {
               instructores={instructores}
               horarios={horarios}
               allFichas={fichasVisibles}
+              ambientes={ambientes}
             />
           )}
 

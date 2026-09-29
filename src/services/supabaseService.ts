@@ -42,6 +42,8 @@ export async function fetchFichasFromSupabase(): Promise<Ficha[]> {
       instructorLiderEmail: 'instructor@correo.edu.co',
       modalidad: (row.modalidad as any) || 'Presencial Diurna',
       ambientePrincipal: row.ambiente_principal || 'Ambiente Principal',
+      // undefined si la columna no existe (20260929h sin correr): se conserva lo local.
+      ambientesExcepcion: row.ambientes_excepcion && typeof row.ambientes_excepcion === 'object' ? row.ambientes_excepcion : undefined,
       periodoLectivo: row.periodo_lectivo || '2026-III',
       fechaInicio: row.fecha_inicio ? String(row.fecha_inicio).split('T')[0] : '2026-07-01',
       fechaFin: row.fecha_fin ? String(row.fecha_fin).split('T')[0] : '2027-12-15',
@@ -165,7 +167,9 @@ export async function updateFichaInSupabase(id: string, ficha: Partial<Ficha>): 
     if (ficha.horasIndependientesTotales !== undefined) payload.horas_independientes_totales = ficha.horasIndependientesTotales;
     if (ficha.horasEjecutadas !== undefined) payload.horas_ejecutadas = ficha.horasEjecutadas;
     // Columnas de 20260929f (resultado de Juicios Evaluativos)
-    const COLUMNAS_JUICIOS = ['tasa_retencion', 'tasa_desercion', 'aprendices_condicionados', 'aprendices_trasladados', 'progreso_curricular'];
+    const COLUMNAS_JUICIOS = ['tasa_retencion', 'tasa_desercion', 'aprendices_condicionados', 'aprendices_trasladados', 'progreso_curricular', 'ambientes_excepcion'];
+    // Columna de 20260929h (excepciones de ambiente por día)
+    if (ficha.ambientesExcepcion !== undefined) payload.ambientes_excepcion = ficha.ambientesExcepcion || {};
     if (ficha.tasaRetencion !== undefined) payload.tasa_retencion = ficha.tasaRetencion;
     if (ficha.tasaDesercion !== undefined) payload.tasa_desercion = ficha.tasaDesercion;
     if (ficha.aprendicesCondicionados !== undefined) payload.aprendices_condicionados = ficha.aprendicesCondicionados;
@@ -1173,6 +1177,7 @@ export async function fetchHorariosFromSupabase(): Promise<BloqueHorario[]> {
       diaSemana: row.dia_semana,
       franja: row.franja,
       ambiente: row.ambiente,
+      ambienteEspecial: row.ambiente_especial || undefined,
       instructorId: row.instructor_id || undefined,
       instructorNombre: row.instructor_nombre || undefined,
       vacante: Boolean(row.vacante) || !row.instructor_id,
@@ -1204,6 +1209,7 @@ function bloqueASupabasePayload(bloque: BloqueHorario) {
     dia_semana: bloque.diaSemana,
     franja: bloque.franja,
     ambiente: bloque.ambiente || 'Ambiente Principal',
+    ambiente_especial: bloque.ambienteEspecial || null,
     rap_codigo: bloque.rapCodigo || '',
     rap_titulo: bloque.rapTitulo || bloque.rapCodigo || '',
     competencia_codigo: bloque.competenciaCodigo || '',
@@ -1235,13 +1241,21 @@ function explicarErrorBloque(error: { code?: string; message?: string; details?:
   return msg + (error.details ? ` (${error.details})` : '');
 }
 
+/** Upsert de un bloque; si la columna ambiente_especial aún no existe (20260929h), se reintenta sin ella. */
+async function upsertBloque(bloque: BloqueHorario) {
+  const payload: Record<string, any> = bloqueASupabasePayload(bloque);
+  let res = await supabase.from('bloques_horarios').upsert([payload], { onConflict: 'id' }).select();
+  if (res.error && (res.error.code === 'PGRST204' || /ambiente_especial/.test(res.error.message || ''))) {
+    delete payload.ambiente_especial;
+    res = await supabase.from('bloques_horarios').upsert([payload], { onConflict: 'id' }).select();
+  }
+  return res;
+}
+
 export async function insertHorarioInSupabase(bloque: BloqueHorario): Promise<SyncResult<any>> {
   if (!isSupabaseConfigured) return { success: false, error: 'Supabase no configurado' };
   try {
-    const { data, error } = await supabase
-      .from('bloques_horarios')
-      .upsert([bloqueASupabasePayload(bloque)], { onConflict: 'id' })
-      .select();
+    const { data, error } = await upsertBloque(bloque);
 
     if (error) {
       const isRls = error.code === '42501' || error.message?.toLowerCase().includes('row-level security');
@@ -1256,12 +1270,9 @@ export async function insertHorarioInSupabase(bloque: BloqueHorario): Promise<Sy
 export async function updateHorarioInSupabase(bloque: BloqueHorario): Promise<SyncResult<any>> {
   if (!isSupabaseConfigured) return { success: false, error: 'Supabase no configurado' };
   try {
-    const { data, error } = await supabase
-      .from('bloques_horarios')
-      // upsert en vez de update: si el bloque nunca había llegado a Supabase
-      // (por el error de la columna instructor_nombre), se crea ahora.
-      .upsert([bloqueASupabasePayload(bloque)], { onConflict: 'id' })
-      .select();
+    // upsert en vez de update: si el bloque nunca había llegado a Supabase
+    // (por el error de la columna instructor_nombre), se crea ahora.
+    const { data, error } = await upsertBloque(bloque);
 
     if (error) {
       const isRls = error.code === '42501' || error.message?.toLowerCase().includes('row-level security');

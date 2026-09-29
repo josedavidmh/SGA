@@ -1,12 +1,12 @@
 import React from 'react';
 import { FileBarChart2, Users, MapPin, FileSpreadsheet, FileText, AlertTriangle } from 'lucide-react';
-import { User, Instructor, BloqueHorario, Ficha } from '../types';
+import { User, Instructor, BloqueHorario, Ficha, AmbienteAprendizaje } from '../types';
 import { ReportesInstructoresView } from './ReportesInstructoresView';
 import {
-  calcularUsoAmbientesPorFichaTrimestre,
   obtenerTrimestresDisponibles,
-  exportarUsoAmbientesExcel,
-  exportarUsoAmbientesPDF
+  calcularAmbientesConFichas,
+  exportarAmbientesConFichasExcel,
+  exportarAmbientesConFichasPDF
 } from '../services/ambientesReporteService';
 
 interface ReportesViewProps {
@@ -14,6 +14,8 @@ interface ReportesViewProps {
   instructores: Instructor[];
   horarios: BloqueHorario[];
   allFichas: Ficha[];
+  /** Catálogo de ambientes (Parametrizaciones). */
+  ambientes?: AmbienteAprendizaje[];
 }
 
 type SubTabReportes = 'INSTRUCTOR' | 'AMBIENTES';
@@ -59,7 +61,7 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
           }`}
         >
           <MapPin className="w-4 h-4" />
-          <span>Ambientes por Ficha</span>
+          <span>Ambientes y sus Fichas</span>
         </button>
       </div>
 
@@ -73,55 +75,52 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
       )}
 
       {subTab === 'AMBIENTES' && (
-        <ReporteAmbientesPorFicha horarios={props.horarios} allFichas={props.allFichas} />
+        <ReporteAmbientesConFichas horarios={props.horarios} allFichas={props.allFichas} ambientes={props.ambientes || []} />
       )}
     </div>
   );
 };
 
 // =====================================================================
-// Reporte: Ambientes por Ficha, por Trimestre
+// Reporte general: cada ambiente con sus fichas (base y excepciones)
 // =====================================================================
 
-interface ReporteAmbientesPorFichaProps {
+interface ReporteAmbientesConFichasProps {
   horarios: BloqueHorario[];
   allFichas: Ficha[];
+  ambientes: AmbienteAprendizaje[];
 }
 
-const ReporteAmbientesPorFicha: React.FC<ReporteAmbientesPorFichaProps> = ({ horarios, allFichas }) => {
+const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ horarios, allFichas, ambientes }) => {
   const trimestresDisponibles = React.useMemo(() => obtenerTrimestresDisponibles(horarios), [horarios]);
-  const [trimestreFiltro, setTrimestreFiltro] = React.useState<string>('TODOS');
+  const [trimestreFiltro, setTrimestreFiltro] = React.useState<string>(() => trimestresDisponibles[0] || 'TODOS');
+  const [busqueda, setBusqueda] = React.useState('');
+  const [soloConExcepciones, setSoloConExcepciones] = React.useState(false);
 
   const items = React.useMemo(
-    () => calcularUsoAmbientesPorFichaTrimestre(allFichas, horarios),
-    [allFichas, horarios]
+    () => calcularAmbientesConFichas(allFichas, horarios, ambientes, trimestreFiltro),
+    [allFichas, horarios, ambientes, trimestreFiltro]
   );
 
-  const itemsFiltrados = React.useMemo(
-    () => (trimestreFiltro === 'TODOS' ? items : items.filter(i => i.trimestre === trimestreFiltro)),
-    [items, trimestreFiltro]
-  );
+  const itemsFiltrados = React.useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    return items.filter(a => {
+      if (soloConExcepciones && !a.fichas.some(f => f.uso === 'EXCEPCION')) return false;
+      if (!q) return true;
+      return a.ambiente.toLowerCase().includes(q) || a.fichas.some(f => f.fichaNumero.includes(q) || f.programaNombre.toLowerCase().includes(q));
+    });
+  }, [items, busqueda, soloConExcepciones]);
 
-  const ambientesDistintos = React.useMemo(
-    () => new Set(itemsFiltrados.flatMap(i => i.ambientes)).size,
-    [itemsFiltrados]
-  );
-
-  // Ficha que usó más de un ambiente dentro del MISMO trimestre — normalmente
-  // no debería pasar (el ambiente es fijo por ficha) y suele indicar un
-  // cambio de ambiente a mitad de trimestre o un bloque mal cargado.
-  const fichasConMultiplesAmbientes = React.useMemo(
-    () => itemsFiltrados.filter(i => i.ambientes.length > 1),
-    [itemsFiltrados]
-  );
+  const libres = items.filter(a => a.fichas.length === 0).length;
+  const excepciones = items.reduce((acc, a) => acc + a.fichas.filter(f => f.uso === 'EXCEPCION').length, 0);
 
   return (
     <div className="space-y-5">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-black text-[#111C2D]">Uso de Ambientes por Ficha</h2>
+          <h2 className="text-base font-black text-[#111C2D]">Ambientes y sus Fichas</h2>
           <p className="text-xs text-slate-500 font-medium">
-            Qué ambiente ocupó cada ficha en cada trimestre, a partir de lo realmente programado en Horarios.
+            Cada ambiente con las fichas que lo tienen como base y las que van allí por excepción (días o franjas), según lo programado en Horarios.
           </p>
         </div>
 
@@ -138,7 +137,7 @@ const ReporteAmbientesPorFicha: React.FC<ReporteAmbientesPorFichaProps> = ({ hor
           </select>
           <button
             type="button"
-            onClick={() => exportarUsoAmbientesExcel(items, trimestreFiltro)}
+            onClick={() => exportarAmbientesConFichasExcel(itemsFiltrados, trimestreFiltro)}
             className="flex items-center space-x-1.5 bg-[#0D631B] hover:bg-[#0a4d15] text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition-all"
           >
             <FileSpreadsheet className="w-4 h-4" />
@@ -146,7 +145,7 @@ const ReporteAmbientesPorFicha: React.FC<ReporteAmbientesPorFichaProps> = ({ hor
           </button>
           <button
             type="button"
-            onClick={() => exportarUsoAmbientesPDF(items, trimestreFiltro)}
+            onClick={() => exportarAmbientesConFichasPDF(itemsFiltrados, trimestreFiltro)}
             className="flex items-center space-x-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-all"
           >
             <FileText className="w-4 h-4 text-red-500" />
@@ -158,73 +157,90 @@ const ReporteAmbientesPorFicha: React.FC<ReporteAmbientesPorFichaProps> = ({ hor
       {/* Resumen */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
-          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Fichas en el Reporte</div>
-          <div className="text-xl font-black text-[#111C2D]">{itemsFiltrados.length}</div>
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Ambientes</div>
+          <div className="text-xl font-black text-[#111C2D]">{items.length} <span className="text-xs font-semibold text-slate-400">({libres} libres)</span></div>
         </div>
         <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
-          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Ambientes Distintos Usados</div>
-          <div className="text-xl font-black text-[#0D631B]">{ambientesDistintos}</div>
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Fichas con ambiente base</div>
+          <div className="text-xl font-black text-[#0D631B]">{items.reduce((acc, a) => acc + a.fichas.filter(f => f.uso === 'BASE').length, 0)}</div>
         </div>
-        <div className={`p-4 rounded-2xl border shadow-xs ${fichasConMultiplesAmbientes.length > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200/80'}`}>
-          <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${fichasConMultiplesAmbientes.length > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
-            Fichas con Más de un Ambiente / Trimestre
-          </div>
-          <div className={`text-xl font-black ${fichasConMultiplesAmbientes.length > 0 ? 'text-amber-700' : 'text-[#111C2D]'}`}>
-            {fichasConMultiplesAmbientes.length}
-          </div>
+        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Usos por excepción</div>
+          <div className="text-xl font-black text-violet-700">{excepciones}</div>
         </div>
       </div>
 
-      {fichasConMultiplesAmbientes.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-start gap-2.5">
-          <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-          <p className="text-[11px] text-amber-800 leading-relaxed">
-            Estas fichas quedaron con bloques guardados en más de un ambiente dentro del mismo trimestre. Puede ser un cambio real de salón a mitad de trimestre, o un bloque cargado antes de corregir el ambiente de la ficha — vale la pena revisarlas.
-          </p>
-        </div>
-      )}
+      {/* Filtros */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <input
+          type="text"
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="Buscar ambiente, ficha o programa…"
+          className="w-full sm:w-72 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-[#0D631B]"
+        />
+        <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 cursor-pointer">
+          <input type="checkbox" checked={soloConExcepciones} onChange={(e) => setSoloConExcepciones(e.target.checked)} className="accent-violet-600" />
+          Solo ambientes con excepciones
+        </label>
+      </div>
 
       {/* Tabla */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-left text-xs min-w-[820px]">
             <thead>
               <tr className="border-b border-slate-200 text-slate-400 font-bold uppercase text-[10px] tracking-wider bg-slate-50/80">
-                <th className="py-2.5 px-3">Trimestre</th>
+                <th className="py-2.5 px-3 w-56">Ambiente</th>
                 <th className="py-2.5 px-3">Ficha</th>
-                <th className="py-2.5 px-3">Programa</th>
-                <th className="py-2.5 px-3">Ambiente(s)</th>
-                <th className="py-2.5 px-3 text-center">Bloques</th>
+                <th className="py-2.5 px-3">Uso</th>
+                <th className="py-2.5 px-3">Días y franjas</th>
                 <th className="py-2.5 px-3 text-center">Horas/sem</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {itemsFiltrados.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400">
-                    No hay bloques de horario programados para este filtro.
+                  <td colSpan={5} className="py-8 text-center text-slate-400">
+                    {ambientes.length === 0 && items.length === 0
+                      ? 'No hay ambientes registrados. Regístralos en Parametrizaciones → Ambientes.'
+                      : 'No hay ambientes para este filtro.'}
                   </td>
                 </tr>
-              ) : (
-                itemsFiltrados.map(item => (
-                  <tr key={`${item.trimestre}_${item.fichaId}`} className="hover:bg-slate-50/70 transition-colors">
-                    <td className="py-2.5 px-3 font-mono font-bold text-slate-700">{item.trimestre}</td>
-                    <td className="py-2.5 px-3 font-bold text-[#111C2D]">{item.fichaNumero}</td>
-                    <td className="py-2.5 px-3 text-slate-600 max-w-xs truncate">{item.programaNombre}</td>
-                    <td className="py-2.5 px-3">
-                      {item.ambientes.length > 1 ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                          {item.ambientes.join(' / ')}
-                        </span>
+              ) : itemsFiltrados.map(a => (
+                a.fichas.length === 0 ? (
+                  <tr key={a.ambiente} className="border-t border-slate-100">
+                    <td className="py-2.5 px-3 align-top">
+                      <div className="font-bold text-[#111C2D]">{a.ambiente}</div>
+                      <div className="text-[10px] text-slate-400">{[a.tipo, a.sede, a.capacidad ? `${a.capacidad} aprendices` : ''].filter(Boolean).join(' · ')}</div>
+                    </td>
+                    <td colSpan={4} className="py-2.5 px-3 text-slate-400 italic">Libre — sin fichas asignadas</td>
+                  </tr>
+                ) : a.fichas.map((f, i) => (
+                  <tr key={`${a.ambiente}_${f.fichaId}`} className={i === 0 ? 'border-t border-slate-200' : ''}>
+                    {i === 0 && (
+                      <td rowSpan={a.fichas.length} className="py-2.5 px-3 align-top bg-slate-50/40">
+                        <div className="font-bold text-[#111C2D]">{a.ambiente}</div>
+                        <div className="text-[10px] text-slate-400">{[a.tipo, a.sede, a.capacidad ? `${a.capacidad} aprendices` : ''].filter(Boolean).join(' · ')}</div>
+                        <div className="text-[10px] font-bold text-[#0D631B] mt-1">{a.fichas.length} ficha(s) · {a.horasTotales}h/sem</div>
+                      </td>
+                    )}
+                    <td className="py-2.5 px-3 align-top">
+                      <div className="font-bold text-[#111C2D]">{f.fichaNumero}</div>
+                      <div className="text-[10px] text-slate-500 truncate max-w-[220px]" title={f.programaNombre}>{f.programaNombre}</div>
+                    </td>
+                    <td className="py-2.5 px-3 align-top">
+                      {f.uso === 'BASE' ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-[#0D631B] border border-emerald-200">Base</span>
                       ) : (
-                        <span className="text-slate-700 font-medium">{item.ambientes[0]}</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-50 text-violet-800 border border-violet-200">Excepción</span>
                       )}
                     </td>
-                    <td className="py-2.5 px-3 text-center font-bold text-slate-700">{item.totalBloques}</td>
-                    <td className="py-2.5 px-3 text-center font-bold text-[#0D631B]">{item.totalHoras}h</td>
+                    <td className="py-2.5 px-3 align-top text-slate-600">{f.horario || '—'}</td>
+                    <td className="py-2.5 px-3 align-top text-center font-bold text-slate-700">{f.horas}h</td>
                   </tr>
                 ))
-              )}
+              ))}
             </tbody>
           </table>
         </div>

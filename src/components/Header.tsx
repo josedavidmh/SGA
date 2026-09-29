@@ -13,7 +13,8 @@ import {
   ChevronsRight,
   GraduationCap,
   XCircle,
-  X
+  X,
+  Search
 } from 'lucide-react';
 import { User, RegionalCentro, Ficha } from '../types';
 import { isSupabaseConfigured } from '../lib/supabaseClient';
@@ -57,6 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
   isSidebarCollapsed = false
 }) => {
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
+  const [busquedaFicha, setBusquedaFicha] = React.useState('');
 
   // Si es instructor líder, solo puede ver su ficha asignada; Auxiliar, Coordinador y Admin ven todas
   // (la lista que llega ya viene filtrada por permisos desde App)
@@ -73,7 +75,11 @@ export const Header: React.FC<HeaderProps> = ({
       fichas: Ficha[];
     }>();
 
+    // Buscador: número de ficha, programa, líder, ambiente o jornada (sin tildes).
+    const norm = (t?: string) => (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const q = norm(busquedaFicha.trim());
     availableFichas.forEach(f => {
+      if (q && !norm(`${f.numero_ficha} ${f.programaNombre} ${f.programaCodigo} ${f.instructorLiderNombre} ${f.ambientePrincipal} ${f.modalidad}`).includes(q)) return;
       const key = f.programaCodigo || f.programaNombre;
       if (!map.has(key)) {
         map.set(key, {
@@ -87,7 +93,7 @@ export const Header: React.FC<HeaderProps> = ({
     });
 
     return Array.from(map.values());
-  }, [availableFichas]);
+  }, [availableFichas, busquedaFicha]);
 
   return (
     <header 
@@ -210,9 +216,28 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
                 )}
 
+                {/* Buscador de fichas */}
+                {availableFichas.length > 0 && (
+                  <div className="px-3 pt-2 pb-1.5">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        autoFocus
+                        type="text"
+                        value={busquedaFicha}
+                        onChange={(e) => setBusquedaFicha(e.target.value)}
+                        placeholder="Buscar ficha, programa, líder o ambiente…"
+                        className="w-full pl-8 pr-2 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D631B]"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Listado agrupado por Programa: Muestra PRIMERO a qué programa pertenece cada ficha */}
                 <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto px-1 py-1">
-                  {fichasPorPrograma.length === 0 ? (
+                  {availableFichas.length > 0 && fichasPorPrograma.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-slate-400">Sin resultados para "{busquedaFicha}"</div>
+                  ) : fichasPorPrograma.length === 0 ? (
                     <div className="p-4 text-center text-xs text-slate-500">
                       <p className="font-semibold text-slate-700 mb-1">No hay fichas registradas</p>
                       <p className="text-[11px] text-slate-400 mb-3">Registra una ficha para comenzar a gestionar horarios y seguimiento.</p>

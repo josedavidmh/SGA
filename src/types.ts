@@ -47,6 +47,8 @@ export interface Ficha {
   instructorLiderEmail: string;
   modalidad: 'Presencial Diurna' | 'Presencial Nocturna' | 'Mixta / Virtual';
   ambientePrincipal: string;
+  /** Excepciones de ambiente por día: { "<trimestre>|<día>": "<ambiente>" } (ver lib/ambientes.ts). */
+  ambientesExcepcion?: Record<string, string>;
   periodoLectivo: string;
   fechaInicio: string;
   fechaFin: string;
@@ -365,6 +367,8 @@ export interface BloqueHorario {
   fechaCorteFin: string;
   trimestre: string;
   advertenciaPerfil?: AdvertenciaPerfilBloque;
+  /** Ambiente solo para este bloque (excepción por franja). Vacío = el del día o el base de la ficha. */
+  ambienteEspecial?: string;
 }
 
 export interface ConflictoHorario {

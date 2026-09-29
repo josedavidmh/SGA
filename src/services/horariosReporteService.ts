@@ -1,3 +1,4 @@
+import { ambienteEfectivo } from '../lib/ambientes';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -51,7 +52,7 @@ export function exportarHorarioFichaExcel(ficha: Ficha, bloques: BloqueHorario[]
         // El ambiente siempre es el de la ficha (Espacio Físico / Sede), nunca
         // el que haya quedado guardado en el bloque — se muestran así aunque
         // el bloque sea de antes de un cambio de ambiente en la ficha.
-        return b ? `${b.competenciaNombre || b.rapTitulo} | ${b.instructorNombre || 'VACANTE — falta instructor'} (${b.duracionHoras}h) | ${ficha.ambientePrincipal}` : '';
+        return b ? `${b.competenciaNombre || b.rapTitulo} | ${b.instructorNombre || 'VACANTE — falta instructor'} (${b.duracionHoras}h) | ${ambienteEfectivo(b, ficha)}` : '';
       })
     ])
   ];
@@ -62,7 +63,7 @@ export function exportarHorarioFichaExcel(ficha: Ficha, bloques: BloqueHorario[]
   const wsDetalleData = [
     ['DÍA', 'FRANJA HORARIA', 'AMBIENTE', 'INSTRUCTOR ASIGNADO', 'CÓDIGO RAP', 'ACTIVIDAD / MÓDULO', 'HORAS'],
     ...bloques.map(b => [
-      b.diaSemana, b.franja, ficha.ambientePrincipal, b.instructorNombre || 'VACANTE — falta instructor', b.rapCodigo, b.competenciaNombre || b.rapTitulo, b.duracionHoras
+      b.diaSemana, b.franja, ambienteEfectivo(b, ficha), b.instructorNombre || 'VACANTE — falta instructor', b.rapCodigo, b.competenciaNombre || b.rapTitulo, b.duracionHoras
     ])
   ];
   const wsDetalle = XLSX.utils.aoa_to_sheet(wsDetalleData);
@@ -95,7 +96,11 @@ export function exportarHorarioFichaPDF(ficha: Ficha, bloques: BloqueHorario[], 
       `${f.label}\n${f.sub}`,
       ...dias.map(d => {
         const b = encontrarBloque(bloques, d, f.franja);
-        return b ? `${b.competenciaNombre || b.rapTitulo}\n${b.instructorNombre || 'VACANTE — falta instructor'} (${b.duracionHoras}h)` : 'Libre';
+        if (!b) return 'Libre';
+        const amb = ambienteEfectivo(b, ficha);
+        // Solo se escribe el ambiente cuando es distinto al base (excepción).
+        const extra = amb && amb !== ficha.ambientePrincipal ? `\nAmbiente: ${amb}` : '';
+        return `${b.competenciaNombre || b.rapTitulo}\n${b.instructorNombre || 'VACANTE — falta instructor'} (${b.duracionHoras}h)${extra}`;
       })
     ]),
     styles: { fontSize: 7.5, cellPadding: 4, valign: 'top' },
@@ -169,7 +174,7 @@ export function exportarHorariosPorInstructorExcel(bloques: BloqueHorario[], dia
         `${f.label} (${f.sub})`,
         ...dias.map(d => {
           const b = g.bloques.find(x => x.diaSemana === d && x.franja === f.franja);
-          const ambienteFicha = fichasPorId[b?.fichaId || '']?.ambientePrincipal || b?.ambiente || '';
+          const ambienteFicha = (b ? ambienteEfectivo(b, fichasPorId[b.fichaId]) : '');
           return b ? `${etiquetaFicha(fichasPorId, b.fichaId)} | ${b.competenciaNombre || b.rapTitulo} (${b.duracionHoras}h) | ${ambienteFicha}` : '';
         })
       ]);
@@ -223,7 +228,7 @@ export function exportarHorariosPorInstructorPDF(bloques: BloqueHorario[], dias:
         `${f.label}\n${f.sub}`,
         ...dias.map(d => {
           const b = g.bloques.find(x => x.diaSemana === d && x.franja === f.franja);
-          const ambienteFicha = fichasPorId[b?.fichaId || '']?.ambientePrincipal || b?.ambiente || '';
+          const ambienteFicha = (b ? ambienteEfectivo(b, fichasPorId[b.fichaId]) : '');
           return b ? `${etiquetaFicha(fichasPorId, b.fichaId)}\n${b.competenciaNombre || b.rapTitulo}\n${ambienteFicha} (${b.duracionHoras}h)` : 'Libre';
         })
       ]),

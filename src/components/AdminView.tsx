@@ -15,7 +15,7 @@ import {
 import { User, AuditoriaSistema, RegionalCentro, UserRole } from '../types';
 import { ModalSupabaseGuia } from './ModalSupabaseGuia';
 import { isSupabaseConfigured } from '../lib/supabaseClient';
-import { UserPlus, KeyRound, X } from 'lucide-react';
+import { UserPlus, KeyRound, X, Search } from 'lucide-react';
 
 interface AdminProps {
   currentUser: User;
@@ -43,6 +43,17 @@ export const AdminView: React.FC<AdminProps> = ({
   onEditarCorreoUsuario
 }) => {
   const [filterModulo, setFilterModulo] = React.useState<string>('TODOS');
+  // Buscador y filtro de rol de usuarios (la lista crecerá con el tiempo).
+  const [busquedaUsuario, setBusquedaUsuario] = React.useState('');
+  const [filtroRolUsuario, setFiltroRolUsuario] = React.useState<string>('TODOS');
+  const usuariosFiltrados = React.useMemo(() => {
+    const norm = (t?: string) => (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const q = norm(busquedaUsuario.trim());
+    return usersList.filter(u =>
+      (filtroRolUsuario === 'TODOS' || u.rol === filtroRolUsuario) &&
+      (!q || norm(`${u.nombre_completo} ${u.correo} ${u.cargo} ${u.rol}`).includes(q))
+    );
+  }, [usersList, busquedaUsuario, filtroRolUsuario]);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = React.useState<boolean>(false);
   const [isModalUsuarioOpen, setIsModalUsuarioOpen] = React.useState<boolean>(false);
   const [usuarioEditandoClave, setUsuarioEditandoClave] = React.useState<User | null>(null);
@@ -186,8 +197,39 @@ export const AdminView: React.FC<AdminProps> = ({
           )}
         </div>
 
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          <div className="relative w-full sm:w-80">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={busquedaUsuario}
+              onChange={(e) => setBusquedaUsuario(e.target.value)}
+              placeholder="Buscar por nombre, correo o cargo…"
+              className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-[#0D631B]"
+            />
+          </div>
+          <select
+            value={filtroRolUsuario}
+            onChange={(e) => setFiltroRolUsuario(e.target.value)}
+            className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none"
+          >
+            <option value="TODOS">Todos los roles</option>
+            <option value="ADMINISTRADOR">Administrador</option>
+            <option value="COORDINADOR">Coordinador</option>
+            <option value="INSTRUCTOR_LIDER">Instructor Líder</option>
+            <option value="AUXILIAR">Auxiliar</option>
+          </select>
+          <span className="text-[11px] text-slate-400 sm:ml-auto">{usuariosFiltrados.length} de {usersList.length} usuarios</span>
+        </div>
+
+        {usuariosFiltrados.length === 0 && (
+          <div className="p-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+            Ningún usuario coincide con la búsqueda.
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {usersList.map(u => {
+          {usuariosFiltrados.map(u => {
             const isRootAdmin = u.id === 'usr_admin';
             const isCurrent = u.id === currentUser.id;
             return (

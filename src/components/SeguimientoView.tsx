@@ -50,6 +50,7 @@ import {
 } from '../types';
 import { exportarSeguimientoExcel } from '../services/excelService';
 import { InstructorSearchSelect } from './InstructorSearchSelect';
+import { ListaFichasConBuscador } from './ListaFichasConBuscador';
 import {
   exportarResultadosSeguimientoExcel,
   exportarResultadosSeguimientoPDF,
@@ -397,31 +398,7 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
         </div>
 
         {allFichas && allFichas.length > 0 && onSelectFicha && (
-          <div className="pt-2 text-left">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 text-center">
-              Fichas Disponibles por Programa de Formación
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-64 overflow-y-auto p-1">
-              {allFichas.map(f => (
-                <button
-                  key={f.id}
-                  onClick={() => onSelectFicha(f)}
-                  className="p-3 rounded-xl bg-slate-50 hover:bg-[#E8F5E9] hover:border-[#C8E6C9] border border-slate-200 text-left transition-all group"
-                >
-                  <div className="text-xs font-bold text-[#111C2D] group-hover:text-[#0D631B] truncate">
-                    {f.programaNombre}
-                  </div>
-                  <div className="flex items-center space-x-2 text-[11px] text-slate-500 mt-1">
-                    <span className="font-mono font-bold text-slate-700 bg-white px-1.5 py-0.2 rounded border border-slate-200">
-                      Ficha {f.numero_ficha}
-                    </span>
-                    <span>•</span>
-                    <span>{f.modalidad}</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
+          <ListaFichasConBuscador fichas={allFichas} onSelect={onSelectFicha} />
         )}
       </div>
     );

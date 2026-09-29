@@ -1,7 +1,8 @@
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Ficha, BloqueHorario } from '../types';
+import { Ficha, BloqueHorario, AmbienteAprendizaje } from '../types';
+import { ambienteEfectivo, esAmbienteGenerico, normalizarAmbiente } from '../lib/ambientes';
 
 const COLOR_ENCABEZADO: [number, number, number] = [13, 99, 27];
 
@@ -59,7 +60,7 @@ export function calcularUsoAmbientesPorFichaTrimestre(
     }
 
     const item = mapa.get(key)!;
-    const ambiente = (ficha?.ambientePrincipal || b.ambiente || 'Sin ambiente asignado').trim();
+    const ambiente = (ambienteEfectivo(b, ficha) || 'Sin ambiente asignado').trim();
     item.ambientesSet.add(ambiente);
     item.totalBloques += 1;
     item.totalHoras += b.duracionHoras || 0;
@@ -157,4 +158,208 @@ export function exportarUsoAmbientesPDF(items: UsoAmbienteFichaTrimestre[], trim
 
   const sufijo = trimestreFiltro === 'TODOS' ? 'Todos' : trimestreFiltro;
   doc.save(`Reporte_Ambientes_por_Ficha_${sufijo}.pdf`);
+}
+
+// ===========================================================================
+// REPORTE GENERAL: AMBIENTES Y SUS FICHAS
+// (ambiente base de cada ficha + excepciones por día/franja programadas)
+// ===========================================================================
+
+const ORDEN_DIAS: Record<string, number> = { Lunes: 1, Martes: 2, 'Miércoles': 3, Jueves: 4, Viernes: 5, 'Sábado': 6 };
+const ABREV_DIA: Record<string, string> = { Lunes: 'Lun', Martes: 'Mar', 'Miércoles': 'Mié', Jueves: 'Jue', Viernes: 'Vie', 'Sábado': 'Sáb' };
+
+export interface FichaEnAmbiente {
+  fichaId: string;
+  fichaNumero: string;
+  programaNombre: string;
+  /** BASE: es su ambiente de siempre. EXCEPCION: va allí solo algunos días/franjas. */
+  uso: 'BASE' | 'EXCEPCION';
+  /** Días y franjas programados en ese ambiente, p.ej. "Lun 07:00-10:00, Jue (todo el día)". */
+  horario: string;
+  bloques: number;
+  horas: number;
+}
+
+export interface AmbienteConFichas {
+  ambiente: string;
+  tipo?: string;
+  sede?: string;
+  capacidad?: number;
+  estado?: string;
+  fichas: FichaEnAmbiente[];
+  horasTotales: number;
+}
+
+export function calcularAmbientesConFichas(
+  fichas: Ficha[],
+  bloques: BloqueHorario[],
+  catalogo: AmbienteAprendizaje[],
+  trimestreFiltro: string = 'TODOS'
+): AmbienteConFichas[] {
+  const fichaPorId = new Map(fichas.map(f => [f.id, f]));
+  const mapa = new Map<string, AmbienteConFichas>();
+  const clave = (n: string) => normalizarAmbiente(n);
+  const obtener = (nombre: string) => {
+    const k = clave(nombre);
+    if (!mapa.has(k)) {
+      const cat = catalogo.find(a => clave(a.nombre) === k);
+      mapa.set(k, {
+        ambiente: cat?.nombre || nombre,
+        tipo: cat?.tipo, sede: cat?.sede, capacidad: cat?.capacidadAprendices, estado: cat?.estado,
+        fichas: [], horasTotales: 0
+      });
+    }
+    return mapa.get(k)!;
+  };
+
+  // Todos los ambientes del catálogo aparecen (aunque estén libres).
+  catalogo.forEach(a => { if (a.nombre) obtener(a.nombre); });
+
+  // 1) Fichas con ese ambiente como BASE (aunque aún no tengan bloques).
+  const acumulado = new Map<string, FichaEnAmbiente & { celdas: string[] }>();
+  fichas.forEach(f => {
+    if (esAmbienteGenerico(f.ambientePrincipal)) return;
+    const k = `${clave(f.ambientePrincipal)}__${f.id}`;
+    acumulado.set(k, {
+      fichaId: f.id, fichaNumero: f.numero_ficha, programaNombre: f.programaNombre,
+      uso: 'BASE', horario: '', bloques: 0, horas: 0, celdas: []
+    });
+    obtener(f.ambientePrincipal);
+  });
+
+  // 1b) Excepciones por día definidas en la ficha (aunque ese día aún no
+  //     tenga bloques programados): la ficha aparece en ese ambiente.
+  fichas.forEach(f => {
+    Object.entries(f.ambientesExcepcion || {}).forEach(([claveDia, amb]) => {
+      const [t, dia] = claveDia.split('|');
+      if (!amb || esAmbienteGenerico(amb)) return;
+      if (trimestreFiltro !== 'TODOS' && t !== trimestreFiltro) return;
+      obtener(amb);
+      const k = `${clave(amb)}__${f.id}`;
+      if (!acumulado.has(k)) {
+        acumulado.set(k, {
+          fichaId: f.id, fichaNumero: f.numero_ficha, programaNombre: f.programaNombre,
+          uso: 'EXCEPCION', horario: '', bloques: 0, horas: 0, celdas: []
+        });
+      }
+      acumulado.get(k)!.celdas.push(`${dia}|DIA|${t}`);
+    });
+  });
+
+  // 2) Bloques programados: dónde se dicta realmente cada uno.
+  bloques
+    .filter(b => trimestreFiltro === 'TODOS' || b.trimestre === trimestreFiltro)
+    .forEach(b => {
+      const f = fichaPorId.get(b.fichaId);
+      const amb = ambienteEfectivo(b, f);
+      if (esAmbienteGenerico(amb)) return;
+      obtener(amb);
+      const k = `${clave(amb)}__${b.fichaId}`;
+      if (!acumulado.has(k)) {
+        acumulado.set(k, {
+          fichaId: b.fichaId, fichaNumero: f?.numero_ficha || b.fichaId, programaNombre: f?.programaNombre || '',
+          uso: f && clave(f.ambientePrincipal) === clave(amb) ? 'BASE' : 'EXCEPCION',
+          horario: '', bloques: 0, horas: 0, celdas: []
+        });
+      }
+      const item = acumulado.get(k)!;
+      item.bloques += 1;
+      item.horas += b.duracionHoras || 0;
+      item.celdas.push(`${b.diaSemana}|${b.franja}|${b.trimestre}`);
+    });
+
+  acumulado.forEach((item, k) => {
+    const ambKey = k.split('__')[0];
+    const destino = mapa.get(ambKey);
+    if (!destino) return;
+    // Si un día completo está en este ambiente, no se repiten sus franjas.
+    const diasCompletos = new Set(item.celdas.filter(c => c.split('|')[1] === 'DIA').map(c => `${c.split('|')[0]}|${c.split('|')[2]}`));
+    const celdasUtiles = item.celdas.filter(c => {
+      const [d, fr, t] = c.split('|');
+      return fr === 'DIA' || !diasCompletos.has(`${d}|${t}`);
+    });
+    const ordenadas = [...new Set(celdasUtiles)].sort((a, b) => {
+      const [da, fa] = a.split('|'); const [db, fb] = b.split('|');
+      return (ORDEN_DIAS[da] || 9) - (ORDEN_DIAS[db] || 9) || fa.localeCompare(fb);
+    });
+    item.horario = ordenadas.length === 0
+      ? (item.uso === 'BASE' ? 'Sin bloques programados' : '')
+      : ordenadas.map(c => {
+          const [d, fr, t] = c.split('|');
+          const franjaTxt = fr === 'DIA' ? 'día completo' : fr.replace(/\s/g, '');
+          return `${ABREV_DIA[d] || d} ${franjaTxt}${trimestreFiltro === 'TODOS' ? ` (${t})` : ''}`;
+        }).join(', ');
+    const { celdas: _c, ...limpio } = item;
+    destino.fichas.push(limpio);
+    destino.horasTotales += item.horas;
+  });
+
+  mapa.forEach(a => a.fichas.sort((x, y) => (x.uso === y.uso ? x.fichaNumero.localeCompare(y.fichaNumero) : x.uso === 'BASE' ? -1 : 1)));
+  return Array.from(mapa.values()).sort((a, b) => a.ambiente.localeCompare(b.ambiente));
+}
+
+export function exportarAmbientesConFichasExcel(items: AmbienteConFichas[], trimestreFiltro: string = 'TODOS') {
+  const wsData: (string | number)[][] = [
+    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR - AMBIENTES Y SUS FICHAS'],
+    [trimestreFiltro === 'TODOS' ? 'Todos los trimestres' : `Trimestre: ${trimestreFiltro}`],
+    [`AMBIENTES: ${items.length} | CON FICHAS: ${items.filter(i => i.fichas.length > 0).length}`],
+    [],
+    ['AMBIENTE', 'TIPO', 'SEDE', 'CAPACIDAD', 'FICHA', 'PROGRAMA', 'USO', 'DÍAS Y FRANJAS', 'BLOQUES', 'HORAS/SEM']
+  ];
+  items.forEach(a => {
+    if (a.fichas.length === 0) {
+      wsData.push([a.ambiente, a.tipo || '', a.sede || '', a.capacidad ?? '', '—', 'Libre', '', '', 0, 0]);
+      return;
+    }
+    a.fichas.forEach(f => wsData.push([
+      a.ambiente, a.tipo || '', a.sede || '', a.capacidad ?? '',
+      f.fichaNumero, f.programaNombre, f.uso === 'BASE' ? 'Base' : 'Excepción', f.horario, f.bloques, f.horas
+    ]));
+  });
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 36 }, { wch: 11 }, { wch: 50 }, { wch: 9 }, { wch: 10 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Ambientes y Fichas');
+  XLSX.writeFile(wb, `Ambientes_y_Fichas_${trimestreFiltro === 'TODOS' ? 'Todos' : trimestreFiltro}.xlsx`);
+}
+
+export function exportarAmbientesConFichasPDF(items: AmbienteConFichas[], trimestreFiltro: string = 'TODOS') {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  doc.setFontSize(13);
+  doc.setFont('helvetica', 'bold');
+  doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR', 40, 36);
+  doc.setFontSize(11);
+  doc.text('Ambientes y sus Fichas', 40, 54);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`${trimestreFiltro === 'TODOS' ? 'Todos los trimestres' : `Trimestre: ${trimestreFiltro}`} — ${items.length} ambiente(s)`, 40, 70);
+  const body: (string | number)[][] = [];
+  items.forEach(a => {
+    if (a.fichas.length === 0) {
+      body.push([a.ambiente, '—', 'Libre', '', '']);
+      return;
+    }
+    a.fichas.forEach((f, i) => body.push([
+      i === 0 ? a.ambiente : '',
+      `${f.fichaNumero}\n${f.programaNombre}`,
+      f.uso === 'BASE' ? 'Base' : 'Excepción',
+      f.horario,
+      `${f.horas}h`
+    ]));
+  });
+  autoTable(doc, {
+    startY: 84,
+    head: [['Ambiente', 'Ficha / Programa', 'Uso', 'Días y franjas', 'Horas/sem']],
+    body,
+    styles: { fontSize: 7.5, cellPadding: 4, valign: 'top' },
+    headStyles: { fillColor: COLOR_ENCABEZADO, textColor: 255, fontStyle: 'bold' },
+    columnStyles: { 0: { cellWidth: 150, fontStyle: 'bold' }, 1: { cellWidth: 190 }, 2: { cellWidth: 60 }, 3: { cellWidth: 300 }, 4: { cellWidth: 60 } },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 2 && String(data.cell.raw) === 'Excepción') {
+        data.cell.styles.textColor = [109, 40, 217];
+        data.cell.styles.fontStyle = 'bold';
+      }
+    }
+  });
+  doc.save(`Ambientes_y_Fichas_${trimestreFiltro === 'TODOS' ? 'Todos' : trimestreFiltro}.pdf`);
 }
