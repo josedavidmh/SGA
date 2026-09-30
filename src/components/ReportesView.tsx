@@ -1,6 +1,7 @@
 import React from 'react';
-import { FileBarChart2, Users, MapPin, FileSpreadsheet, FileText, AlertTriangle, CalendarRange, TrendingUp } from 'lucide-react';
+import { FileBarChart2, Users, MapPin, FileSpreadsheet, FileText, AlertTriangle, CalendarRange, TrendingUp, Clock } from 'lucide-react';
 import { ReporteCierresIndicadores } from './ReporteCierresIndicadores';
+import { ReporteHorasInstructor } from './ReporteHorasInstructor';
 import { ReporteProgramacionTrimestre } from './ReporteProgramacionTrimestre';
 import { User, Instructor, BloqueHorario, Ficha, AmbienteAprendizaje, RegionalCentro } from '../types';
 import { ReportesInstructoresView } from './ReportesInstructoresView';
@@ -21,7 +22,7 @@ interface ReportesViewProps {
   centro?: RegionalCentro;
 }
 
-type SubTabReportes = 'PROGRAMACION' | 'INSTRUCTOR' | 'AMBIENTES' | 'CIERRES';
+type SubTabReportes = 'PROGRAMACION' | 'INSTRUCTOR' | 'AMBIENTES' | 'CIERRES' | 'HORAS';
 
 // Sección única que agrupa todos los reportes del sistema (antes vivían
 // sueltos: "Horarios por Instructor" era su propia entrada de menú). Cada
@@ -86,6 +87,16 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
           <TrendingUp className="w-4 h-4" />
           <span>Retención y Deserción</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('HORAS')}
+          className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+            subTab === 'HORAS' ? 'bg-[#0D631B] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          <span>Horas por Instructor</span>
+        </button>
       </div>
 
       {subTab === 'PROGRAMACION' && (
@@ -99,6 +110,10 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
           horarios={props.horarios}
           allFichas={props.allFichas}
         />
+      )}
+
+      {subTab === 'HORAS' && (
+        <ReporteHorasInstructor horarios={props.horarios} allFichas={props.allFichas} instructores={props.instructores} centro={props.centro} />
       )}
 
       {subTab === 'CIERRES' && (
