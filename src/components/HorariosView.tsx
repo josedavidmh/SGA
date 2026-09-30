@@ -522,9 +522,10 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
     const choque = buscarChoqueAmbiente(horarios, fichasParaAmbientes, {
       fichaId: ficha.id, trimestre: trimestreSeleccionado, dia, franja, ambiente, excluirIds
     });
-    return choque
-      ? `¡AMBIENTE OCUPADO!\n${choque.ambiente} ya lo usa la ficha ${choque.fichaNumero} el ${dia} en la franja ${franja}.\nElige otra franja, u otro ambiente para este día.`
-      : null;
+    if (!choque) return null;
+    const b = choque.bloque;
+    const detalle = `${b.competenciaNombre || b.competenciaCodigo}${b.instructorNombre ? ` — ${b.instructorNombre}` : ' — sin instructor (vacante)'}`;
+    return `¡AMBIENTE OCUPADO!\n${choque.ambiente} ya lo usa la ficha ${choque.fichaNumero} el ${dia} en la franja ${franja} (trimestre ${b.trimestre}).\nBloque: ${detalle}.\n\nSi esa ficha ya no lo usa, libera ese bloque en el horario de la ficha ${choque.fichaNumero}, o elige otra franja u otro ambiente para este día.`;
   };
 
   // Códigos de RAP que cubre un bloque (competencia completa o selección de RAPs)

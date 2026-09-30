@@ -1,4 +1,5 @@
 import { BloqueHorario, DiaSemana, Ficha, FranjaHorario, JornadaAmbiente } from '../types';
+import { normalizarNombreTrimestre } from './calendarioTrimestres';
 
 /**
  * AMBIENTES DE UNA FICHA EN EL HORARIO
@@ -72,8 +73,12 @@ export function buscarChoqueAmbiente(
   for (const h of horarios) {
     if (h.fichaId === destino.fichaId) continue;
     if (destino.excluirIds?.includes(h.id)) continue;
-    if (h.trimestre !== destino.trimestre || h.diaSemana !== destino.dia || h.franja !== destino.franja) continue;
+    if (h.diaSemana !== destino.dia || h.franja !== destino.franja) continue;
+    if (normalizarNombreTrimestre(h.trimestre) !== normalizarNombreTrimestre(destino.trimestre)) continue;
     const f = fichaPorId.get(h.fichaId);
+    // Una ficha cerrada, reabierta para corrección o con la etapa lectiva
+    // vencida ya no ocupa su ambiente (igual que en la validación de fichas).
+    if (f && !ocupaAmbiente(f)) continue;
     const amb = ambienteEfectivo(h, f);
     if (mismoAmbiente(amb, destino.ambiente)) {
       return { bloque: h, fichaNumero: f?.numero_ficha || 'otra ficha', ambiente: amb };
