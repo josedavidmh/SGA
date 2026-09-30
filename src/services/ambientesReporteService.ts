@@ -316,7 +316,7 @@ export function calcularAmbientesConFichas(
     const fichaItem = fichaPorId.get(item.fichaId);
     item.fechaInicio = fichaItem?.fechaInicio;
     item.fechaFin = fichaItem?.fechaFin;
-    item.vencida = !!fichaItem && (fichaVencida(fichaItem) || fichaItem.estado === 'CERRADA');
+    item.vencida = !!fichaItem && (fichaVencida(fichaItem) || fichaItem.estado === 'CERRADA' || fichaItem.estado === 'POR_CERRAR');
     if (item.vencida) item.sinJornada = false;
     const { celdas: _c, ...limpio } = item;
     destino.fichas.push(limpio);

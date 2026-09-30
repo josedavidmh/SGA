@@ -296,7 +296,7 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">Sin jornada</span>
                       ) : <span className="text-slate-300">—</span>}
                       {f.vencida && f.uso === 'BASE' && (
-                        <div className="text-[10px] font-bold text-slate-400 mt-1" title={`Etapa lectiva hasta ${f.fechaFin || ''}`}>Finalizada · libera el ambiente</div>
+                        <div className="text-[10px] font-bold text-slate-400 mt-1" title={`Etapa lectiva hasta ${f.fechaFin || ''}`}>Finalizada o en cierre · libera el ambiente</div>
                       )}
                     </td>
                     <td className="py-2.5 px-3 align-top text-slate-600">{f.horario || '—'}</td>

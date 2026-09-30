@@ -30,6 +30,8 @@ interface CierresProps {
     aplazados: number, 
     retiros: number
   ) => void;
+  /** Reabre una ficha con cierre consolidado para poder corregirla. */
+  onReabrirCierre?: (fichaId: string) => void;
 }
 
 export const CierresView: React.FC<CierresProps> = ({
@@ -37,7 +39,8 @@ export const CierresView: React.FC<CierresProps> = ({
   ficha,
   allFichas,
   centro,
-  onActualizarBalance
+  onActualizarBalance,
+  onReabrirCierre
 }) => {
   // Formulario de balance (editable manualmente en todo momento, ver más abajo)
   const [culminados, setCulminados] = React.useState<number>(ficha?.aprendicesCulminados || 0);
@@ -187,6 +190,36 @@ export const CierresView: React.FC<CierresProps> = ({
           </span>
         </div>
       </div>
+
+      {ficha.estado === 'CERRADA' && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-amber-50 border border-amber-200">
+          <div className="text-xs text-amber-900">
+            <div className="font-black">Ficha {ficha.numero_ficha} con cierre consolidado</div>
+            <div className="mt-0.5">
+              Sus cifras de cierre están protegidas: un nuevo cargue de Juicios no las cambia. Si necesitas corregirla, reábrela; podrás editar el balance y volver a consolidar.
+            </div>
+          </div>
+          {onReabrirCierre && (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`¿Reabrir el cierre de la ficha ${ficha.numero_ficha}?\n\nQuedará en corrección: no ocupará ambiente y un nuevo cargue de Juicios actualizará sus cifras hasta que la consolides de nuevo.`)) {
+                  onReabrirCierre(ficha.id);
+                }
+              }}
+              className="shrink-0 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm transition-colors"
+            >
+              Reabrir cierre
+            </button>
+          )}
+        </div>
+      )}
+
+      {ficha.estado === 'POR_CERRAR' && (
+        <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
+          <strong>Cierre reabierto:</strong> la ficha {ficha.numero_ficha} está en corrección y no ocupa su ambiente. Al consolidar de nuevo queda cerrada otra vez.
+        </div>
+      )}
 
       {/* Tarjetas Bento de Fórmulas y Resultados */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

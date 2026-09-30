@@ -3288,6 +3288,24 @@ export default function App() {
     );
   };
 
+  // Reabre una ficha con cierre consolidado para poder corregirla. Queda en
+  // POR_CERRAR: conserva los valores del cierre (se pueden editar y volver a
+  // consolidar), NO ocupa el ambiente, y un nuevo cargue de Juicios vuelve a
+  // actualizarla hasta que se consolide otra vez.
+  const handleReabrirCierre = (fichaId: string) => {
+    const f = fichas.find(x => x.id === fichaId);
+    if (!f || f.estado !== 'CERRADA') return;
+    setFichas(prev => prev.map(x => x.id === fichaId ? { ...x, estado: 'POR_CERRAR' } : x));
+    setSelectedFicha(prev => (prev && prev.id === fichaId ? { ...prev, estado: 'POR_CERRAR' } : prev));
+    updateFichaInSupabase(fichaId, { estado: 'POR_CERRAR' }).then(res => {
+      if (!res.success) {
+        console.error('Error al reabrir la ficha en Supabase:', res.error);
+        alert(`La ficha se reabrió en pantalla, pero NO se guardó en Supabase:\n\n${res.error}`);
+      }
+    }).catch(err => console.error('Error al reabrir la ficha en Supabase:', err));
+    registrarLog('REABRIR_CIERRE_FICHA', 'Cierres e Indicadores', `Se reabrió el cierre de la Ficha ${f.numero_ficha}.`);
+  };
+
   // Funciones de Base de Datos
   const handleSeedDatabase = () => {
     setFichas(FICHAS_INICIALES);
@@ -3596,6 +3614,7 @@ export default function App() {
               allFichas={fichasVisibles}
               centro={centro}
               onActualizarBalance={handleActualizarBalance}
+              onReabrirCierre={handleReabrirCierre}
             />
           )}
 

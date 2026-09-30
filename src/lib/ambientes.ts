@@ -114,9 +114,12 @@ export const hoyISO = () => {
 export const fichaVencida = (f: Pick<Ficha, 'fechaFin'>, hoy: string = hoyISO()) =>
   !!f.fechaFin && f.fechaFin < hoy;
 
-/** ¿Esta ficha ocupa su ambiente hoy? Ni las cerradas ni las de etapa lectiva vencida lo ocupan. */
+/**
+ * ¿Esta ficha ocupa su ambiente hoy? No lo ocupan las cerradas, las de cierre
+ * reabierto (POR_CERRAR, en corrección) ni las de etapa lectiva vencida.
+ */
 export const ocupaAmbiente = (f: Ficha, hoy: string = hoyISO()) =>
-  f.estado !== 'CERRADA' && !fichaVencida(f, hoy);
+  f.estado !== 'CERRADA' && f.estado !== 'POR_CERRAR' && !fichaVencida(f, hoy);
 
 /** ¿Dos etapas lectivas se cruzan en el tiempo? Una fecha vacía se toma como abierta. */
 export const rangosSeSolapan = (
