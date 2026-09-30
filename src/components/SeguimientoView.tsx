@@ -48,7 +48,6 @@ import {
   RegistroArchivoSeguimiento,
   EstadoRap
 } from '../types';
-import { exportarSeguimientoExcel } from '../services/excelService';
 import { InstructorSearchSelect } from './InstructorSearchSelect';
 import { ListaFichasConBuscador } from './ListaFichasConBuscador';
 import {
@@ -205,6 +204,40 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
   const filasMatrizFiltradas = filtroFase === 'TODAS'
     ? filasMatriz
     : filasMatriz.filter(f => (f.registro.fase || 'Sin fase').trim() === filtroFase);
+
+  // Agrupación visual: filas SEGUIDAS con la misma fase + actividad de
+  // proyecto se unen en una sola celda, y dentro de ellas, las filas
+  // seguidas de la misma competencia también (rowSpan). 0 = la celda la
+  // cubre una fila de arriba.
+  const spansMatriz = (() => {
+    const n = filasMatrizFiltradas.length;
+    const proyecto = new Array(n).fill(0);
+    const competencia = new Array(n).fill(0);
+    const actividad = new Array(n).fill(0);
+    const claveProyecto = (i: number) => `${filasMatrizFiltradas[i].registro.fase}||${filasMatrizFiltradas[i].registro.actividadProyecto}`;
+    const claveComp = (i: number) => `${claveProyecto(i)}||${filasMatrizFiltradas[i].registro.competenciaCodigo}`;
+    for (let i = 0; i < n; ) {
+      let j = i + 1;
+      while (j < n && claveProyecto(j) === claveProyecto(i)) j++;
+      proyecto[i] = j - i;
+      i = j;
+    }
+    for (let i = 0; i < n; ) {
+      let j = i + 1;
+      while (j < n && claveComp(j) === claveComp(i)) j++;
+      competencia[i] = j - i;
+      i = j;
+    }
+    // Actividad de aprendizaje: misma competencia y mismo texto, en filas seguidas.
+    const claveAct = (i: number) => `${claveComp(i)}||${(filasMatrizFiltradas[i].registro.actividadAprendizaje || '').trim()}`;
+    for (let i = 0; i < n; ) {
+      let j = i + 1;
+      while (j < n && claveAct(j) === claveAct(i)) j++;
+      actividad[i] = j - i;
+      i = j;
+    }
+    return { proyecto, competencia, actividad };
+  })();
 
   // Si la fase elegida ya no existe (cambio de ficha/programa), vuelve a "Todas".
   React.useEffect(() => {
@@ -440,7 +473,21 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
 
           <button
             id="btn-export-seguimiento"
-            onClick={() => exportarSeguimientoExcel(ficha, fichaActividades)}
+            onClick={() => {
+              // Plantilla GPFI-F-134: la matriz COMPLETA de la planeación (todas las fases).
+              if (filasMatriz.length === 0) {
+                mostrarToast('No hay planeación pedagógica cargada para este programa', 'error');
+                return;
+              }
+              exportarMatrizActividadesExcel(ficha, filasMatriz.map(({ registro: r, estado, instructorNombre }) => ({
+                fase: r.fase, actividadProyecto: r.actividadProyecto,
+                competenciaCodigo: r.competenciaCodigo, competenciaDenominacion: r.competenciaDenominacion,
+                rapCodigo: r.rapCodigo, rapDenominacion: r.rapDenominacion,
+                actividadAprendizaje: r.actividadAprendizaje,
+                horasDirectas: r.horasTrabajoDirecto, horasIndependientes: r.horasTrabajoIndependiente,
+                instructorNombre, estadoRap: estado
+              })), []);
+            }}
             className="flex items-center space-x-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-all"
           >
             <Download className="w-4 h-4 text-slate-500" />
@@ -1279,19 +1326,21 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
 
             {/* Tabla de Actividades Curriculares */}
             <div className="overflow-x-auto">
-              <table className="w-full table-fixed text-left text-xs border-collapse min-w-[1100px]">
+              <table className="w-full table-fixed text-left text-xs border-collapse min-w-[1200px]">
                 <colgroup>
-                  <col className="w-[19%]" />
-                  <col className="w-[21%]" />
-                  <col className="w-[28%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[15%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[22%]" />
                   <col className="w-[8%]" />
-                  <col className="w-[13%]" />
+                  <col className="w-[12%]" />
                   <col className="w-[11%]" />
                 </colgroup>
                 <thead>
                   <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase text-[10px] tracking-wider bg-slate-50/60">
                     <th className="py-3 px-3">Fase & Actividad de Proyecto</th>
-                    <th className="py-3 px-3">Competencia & RAP</th>
+                    <th className="py-3 px-3">Competencia</th>
+                    <th className="py-3 px-3">Resultado de Aprendizaje</th>
                     <th className="py-3 px-3">Actividad de Aprendizaje</th>
                     <th className="py-3 px-3 text-center">Horas</th>
                     <th className="py-3 px-3">Instructor Responsable</th>
@@ -1301,36 +1350,49 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filasMatriz.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-10 text-center text-slate-400">
+                      <td colSpan={7} className="py-10 text-center text-slate-400">
                         No hay planeación pedagógica cargada para el programa {ficha.programaCodigo}. Cárgala en Ingesta (Archivo de Seguimiento) para ver aquí sus actividades.
                       </td>
                     </tr>
                   ) : filasMatrizFiltradas.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-slate-400">No hay actividades en esta fase.</td>
+                      <td colSpan={7} className="py-8 text-center text-slate-400">No hay actividades en esta fase.</td>
                     </tr>
-                  ) : filasMatrizFiltradas.map(({ registro: r, rap, estado, instructorNombre }) => (
+                  ) : filasMatrizFiltradas.map(({ registro: r, rap, estado, instructorNombre }, idxFila) => (
                     <tr key={r.id} className="hover:bg-[#F8F9FA] transition-colors">
-                      <td className="py-3.5 px-3 align-top break-words">
-                        <div className="font-bold text-[10px] text-[#6F43C0] uppercase flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#6F43C0] shrink-0"></span>
-                          <span>{r.fase}</span>
-                        </div>
-                        <div className="text-[11px] font-semibold text-slate-700 mt-1 leading-snug">{r.actividadProyecto || '—'}</div>
-                      </td>
+                      {spansMatriz.proyecto[idxFila] > 0 && (
+                        <td rowSpan={spansMatriz.proyecto[idxFila]} className="py-3.5 px-3 align-top break-words bg-slate-50/50 border-r border-slate-100">
+                          <div className="font-bold text-[10px] text-[#6F43C0] uppercase flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#6F43C0] shrink-0"></span>
+                            <span>{r.fase}</span>
+                          </div>
+                          <div className="text-[11px] font-semibold text-slate-700 mt-1 leading-snug">{r.actividadProyecto || '—'}</div>
+                        </td>
+                      )}
+
+                      {spansMatriz.competencia[idxFila] > 0 && (
+                        <td rowSpan={spansMatriz.competencia[idxFila]} className="py-3.5 px-3 align-top break-words border-r border-slate-100">
+                          <div className="font-bold text-[#111C2D]">{r.competenciaCodigo}</div>
+                          <div className="text-[11px] text-slate-500 leading-snug">{r.competenciaDenominacion}</div>
+                          {spansMatriz.competencia[idxFila] > 1 && (
+                            <div className="mt-1 text-[10px] font-semibold text-slate-400">{spansMatriz.competencia[idxFila]} resultados</div>
+                          )}
+                        </td>
+                      )}
 
                       <td className="py-3.5 px-3 align-top break-words">
-                        <div className="font-bold text-[#111C2D]">{r.competenciaCodigo}</div>
-                        <div className="text-[11px] text-slate-500 line-clamp-2" title={r.competenciaDenominacion}>{r.competenciaDenominacion}</div>
-                        <div className="mt-1.5 flex items-start gap-1.5">
-                          <span className="px-1.5 py-0.5 rounded font-black text-[10px] bg-slate-100 text-slate-700 shrink-0">{r.rapCodigo}</span>
-                          <span className="text-[11px] text-slate-600 leading-snug">{r.rapDenominacion}</span>
-                        </div>
+                        <span className="px-1.5 py-0.5 rounded font-black text-[10px] bg-slate-100 text-slate-700">{r.rapCodigo}</span>
+                        <div className="text-[11px] text-slate-600 leading-snug mt-1">{r.rapDenominacion}</div>
                       </td>
 
-                      <td className="py-3.5 px-3 align-top break-words">
-                        <div className="text-xs text-[#111C2D] leading-snug">{r.actividadAprendizaje || '—'}</div>
-                      </td>
+                      {spansMatriz.actividad[idxFila] > 0 && (
+                        <td rowSpan={spansMatriz.actividad[idxFila]} className="py-3.5 px-3 align-top break-words border-r border-slate-100">
+                          <div className="text-xs text-[#111C2D] leading-snug">{r.actividadAprendizaje || '—'}</div>
+                          {spansMatriz.actividad[idxFila] > 1 && (
+                            <div className="mt-1 text-[10px] font-semibold text-slate-400">Aplica a {spansMatriz.actividad[idxFila]} resultados</div>
+                          )}
+                        </td>
+                      )}
 
                       <td className="py-3.5 px-3 align-top text-center">
                         <div className="flex flex-col items-center gap-0.5">
