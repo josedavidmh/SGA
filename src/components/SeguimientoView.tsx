@@ -471,28 +471,7 @@ export const SeguimientoView: React.FC<SeguimientoProps> = ({
             </button>
           )}
 
-          <button
-            id="btn-export-seguimiento"
-            onClick={() => {
-              // Plantilla GPFI-F-134: la matriz COMPLETA de la planeación (todas las fases).
-              if (filasMatriz.length === 0) {
-                mostrarToast('No hay planeación pedagógica cargada para este programa', 'error');
-                return;
-              }
-              exportarMatrizActividadesExcel(ficha, filasMatriz.map(({ registro: r, estado, instructorNombre }) => ({
-                fase: r.fase, actividadProyecto: r.actividadProyecto,
-                competenciaCodigo: r.competenciaCodigo, competenciaDenominacion: r.competenciaDenominacion,
-                rapCodigo: r.rapCodigo, rapDenominacion: r.rapDenominacion,
-                actividadAprendizaje: r.actividadAprendizaje,
-                horasDirectas: r.horasTrabajoDirecto, horasIndependientes: r.horasTrabajoIndependiente,
-                instructorNombre, estadoRap: estado
-              })), []);
-            }}
-            className="flex items-center space-x-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-all"
-          >
-            <Download className="w-4 h-4 text-slate-500" />
-            <span>Exportar Plantilla .xlsx</span>
-          </button>
+          {/* (Se quitó "Exportar Plantilla .xlsx": exportaba lo mismo que la Matriz en "Exportar Resultados".) */}
 
           <div className="relative" ref={menuExportRef}>
             <button

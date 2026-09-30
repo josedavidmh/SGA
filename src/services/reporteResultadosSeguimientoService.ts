@@ -57,118 +57,227 @@ function textoFiltros(filtros: string[] = []) {
 
 const sufijoArchivo = (filtros: string[] = []) => (filtros.length > 0 ? '_filtrado' : '');
 
-export function exportarResultadosSeguimientoExcel(ficha: Ficha, filas: FilaResultadoSeguimiento[], filtros: string[] = []) {
-  const resumen = resumenConteo(filas);
+// Colores del semáforo y de los estados, iguales a los de Seguimiento.
+const SEMAFORO_ESTILO: Record<string, { fondo: string; texto: string; rgbFondo: [number, number, number]; rgbTexto: [number, number, number] }> = {
+  OK: { fondo: 'FFE8F5E9', texto: 'FF2E7D32', rgbFondo: [232, 245, 233], rgbTexto: [46, 125, 50] },
+  ALERTA_PROGRAMAR: { fondo: 'FFFEF3C7', texto: 'FFB45309', rgbFondo: [254, 243, 199], rgbTexto: [180, 83, 9] },
+  AVANZADO: { fondo: 'FFDBEAFE', texto: 'FF1D4ED8', rgbFondo: [219, 234, 254], rgbTexto: [29, 78, 216] }
+};
+const ESTADO_RAP_ESTILO: Record<string, { fondo: string; texto: string; rgbFondo: [number, number, number]; rgbTexto: [number, number, number] }> = {
+  CALIFICADO: { fondo: 'FFD1FAE5', texto: 'FF065F46', rgbFondo: [209, 250, 229], rgbTexto: [6, 95, 70] },
+  EN_EJECUCION: { fondo: 'FFFFEDD5', texto: 'FFC2410C', rgbFondo: [255, 237, 213], rgbTexto: [194, 65, 12] },
+  SIN_CALIFICAR: { fondo: 'FFFFE4E6', texto: 'FFBE123C', rgbFondo: [255, 228, 230], rgbTexto: [190, 18, 60] },
+  PENDIENTE: { fondo: 'FFF1F5F9', texto: 'FF475569', rgbFondo: [241, 245, 249], rgbTexto: [71, 85, 105] }
+};
 
-  const wsData = [
-    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR - RESULTADOS DE SEGUIMIENTO'],
-    [`FICHA: ${ficha.numero_ficha} - ${ficha.programaNombre}`],
-    [`CORTE: ${new Date().toLocaleDateString('es-CO')}`],
-    [textoFiltros(filtros)],
-    [`RAPs: ${resumen.total} totales | ${resumen.pendientes} pendientes | ${resumen.enEjecucion} en ejecución | ${resumen.calificados} evaluados | ${resumen.sinCalificar} sin evaluar`],
-    [],
-    [
-      'CÓD. COMPETENCIA', 'DENOMINACIÓN COMPETENCIA', 'TIPO',
-      'H. PLANEADAS COMP.', 'H. EJECUTADAS COMP.', '% EJECUCIÓN COMP.', 'SEMÁFORO COMPETENCIA',
-      'CÓD. RAP', 'RESULTADO DE APRENDIZAJE', 'INSTRUCTOR ASIGNADO', 'ESTADO DEL RAP'
-    ],
-    ...filas.map(f => [
-      f.competenciaCodigo,
-      f.competenciaDenominacion,
-      f.competenciaTipo,
-      f.horasPlaneadasCompetencia,
-      f.horasEjecutadasCompetencia,
-      f.porcentajeEjecucionCompetencia,
-      ETIQUETA_SEMAFORO[f.estadoSemaforoCompetencia] || f.estadoSemaforoCompetencia,
-      f.rapCodigo,
-      f.rapDenominacion,
-      f.instructorNombre || 'Sin Asignar',
-      ETIQUETA_ESTADO_RAP[f.estadoRap] || f.estadoRap
-    ])
-  ];
-
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [
-    { wch: 16 }, { wch: 32 }, { wch: 12 },
-    { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 },
-    { wch: 12 }, { wch: 45 }, { wch: 26 }, { wch: 16 }
-  ];
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Resultados Seguimiento');
-  XLSX.writeFile(wb, `Resultados_Seguimiento_${ficha.numero_ficha}${sufijoArchivo(filtros)}.xlsx`);
+/** Cuántas filas seguidas comparten la misma competencia (para combinar celdas). */
+function spansPorCompetencia(filas: FilaResultadoSeguimiento[]): number[] {
+  const out = new Array(filas.length).fill(0);
+  for (let i = 0; i < filas.length; ) {
+    let j = i + 1;
+    while (j < filas.length && filas[j].competenciaCodigo === filas[i].competenciaCodigo) j++;
+    out[i] = j - i;
+    i = j;
+  }
+  return out;
 }
 
+function resumenSemaforo(filas: FilaResultadoSeguimiento[]) {
+  const porComp = new Map<string, string>();
+  filas.forEach(f => porComp.set(f.competenciaCodigo, f.estadoSemaforoCompetencia));
+  const v = Array.from(porComp.values());
+  return {
+    competencias: v.length,
+    ok: v.filter(x => x === 'OK').length,
+    alerta: v.filter(x => x === 'ALERTA_PROGRAMAR').length,
+    avanzado: v.filter(x => x === 'AVANZADO').length
+  };
+}
+
+/**
+ * Excel del Comparativo por Competencia & RAPs, con el mismo estilo de la
+ * Matriz de Actividades: competencia combinada sobre sus RAPs, semáforo y
+ * estado de cada RAP con los colores de Seguimiento.
+ */
+export async function exportarResultadosSeguimientoExcel(ficha: Ficha, filas: FilaResultadoSeguimiento[], filtros: string[] = []) {
+  const resumen = resumenConteo(filas);
+  const sem = resumenSemaforo(filas);
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Comparativo Competencias', {
+    views: [{ state: 'frozen', ySplit: 7 }],
+    pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
+  });
+  const COLS = [
+    { h: 'CÓD. COMPETENCIA', w: 13 }, { h: 'COMPETENCIA', w: 38 }, { h: 'TIPO', w: 12 },
+    { h: 'H. PLANEADAS', w: 11 }, { h: 'H. EJECUTADAS', w: 11 }, { h: '% EJECUCIÓN', w: 11 }, { h: 'SEMÁFORO', w: 15 },
+    { h: 'CÓD. RAP', w: 10 }, { h: 'RESULTADO DE APRENDIZAJE', w: 50 }, { h: 'INSTRUCTOR', w: 28 }, { h: 'ESTADO DEL RAP', w: 15 }
+  ];
+  const N = COLS.length;
+  COLS.forEach((c, i) => { ws.getColumn(i + 1).width = c.w; });
+  const VERDE = 'FF0D631B';
+  const borde = { style: 'thin' as const, color: { argb: 'FFCBD5E1' } };
+  const bordes = { top: borde, left: borde, bottom: borde, right: borde };
+  const titulo = (fila: number, texto: string, opts: { bold?: boolean; size?: number; color?: string } = {}) => {
+    ws.mergeCells(fila, 1, fila, N);
+    const c = ws.getCell(fila, 1);
+    c.value = texto;
+    c.font = { bold: opts.bold ?? false, size: opts.size ?? 10, color: { argb: opts.color || 'FF111C2D' } };
+    c.alignment = { vertical: 'middle', wrapText: true };
+  };
+  titulo(1, 'SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR — COMPARATIVO POR COMPETENCIA & RAPs', { bold: true, size: 13, color: VERDE });
+  titulo(2, `FICHA: ${ficha.numero_ficha} — ${ficha.programaNombre} (${ficha.modalidad || ''})`, { bold: true });
+  titulo(3, `CORTE: ${new Date().toLocaleDateString('es-CO')}   |   SEMÁFORO: ${sem.competencias} competencias — ${sem.ok} OK (70%-80%), ${sem.alerta} en alerta (<70%), ${sem.avanzado} avanzadas (>80%)`);
+  titulo(4, textoFiltros(filtros), { bold: filtros.length > 0, color: filtros.length > 0 ? VERDE : 'FF64748B' });
+  titulo(5, `RAPs: ${resumen.total} | ${resumen.pendientes} pendientes | ${resumen.enEjecucion} en ejecución | ${resumen.calificados} evaluados | ${resumen.sinCalificar} sin evaluar`);
+
+  const FILA_ENC = 7;
+  COLS.forEach((c, i) => {
+    const cell = ws.getCell(FILA_ENC, i + 1);
+    cell.value = c.h;
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: VERDE } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.border = bordes;
+  });
+  ws.getRow(FILA_ENC).height = 30;
+  if (filas.length === 0) {
+    ws.mergeCells(FILA_ENC + 1, 1, FILA_ENC + 1, N);
+    ws.getCell(FILA_ENC + 1, 1).value = 'No hay resultados para este filtro.';
+  }
+
+  filas.forEach((f, i) => {
+    const r = FILA_ENC + 1 + i;
+    const valores = [
+      f.competenciaCodigo, f.competenciaDenominacion, f.competenciaTipo,
+      f.horasPlaneadasCompetencia, f.horasEjecutadasCompetencia, f.porcentajeEjecucionCompetencia / 100,
+      ETIQUETA_SEMAFORO[f.estadoSemaforoCompetencia] || f.estadoSemaforoCompetencia,
+      f.rapCodigo, f.rapDenominacion, f.instructorNombre || 'Sin asignar',
+      ETIQUETA_ESTADO_RAP[f.estadoRap] || f.estadoRap
+    ];
+    valores.forEach((v, c) => {
+      const cell = ws.getCell(r, c + 1);
+      cell.value = v as any;
+      cell.font = { size: 9, bold: c === 0 || c === 7 };
+      cell.alignment = { vertical: 'top', wrapText: true, horizontal: c >= 3 && c <= 6 ? 'center' : 'left' };
+      cell.border = bordes;
+    });
+    ws.getCell(r, 6).numFmt = '0%';
+    const s = SEMAFORO_ESTILO[f.estadoSemaforoCompetencia];
+    if (s) {
+      [6, 7].forEach(c => {
+        const cell = ws.getCell(r, c);
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: s.fondo } };
+        cell.font = { size: 9, bold: true, color: { argb: s.texto } };
+      });
+    }
+    const e = ESTADO_RAP_ESTILO[f.estadoRap];
+    const est = ws.getCell(r, N);
+    if (e) {
+      est.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: e.fondo } };
+      est.font = { size: 9, bold: true, color: { argb: e.texto } };
+    }
+    est.alignment = { vertical: 'top', horizontal: 'center', wrapText: true };
+  });
+
+  // La competencia (y su semáforo) se combina sobre sus RAPs seguidos.
+  const spans = spansPorCompetencia(filas);
+  spans.forEach((n, i) => {
+    if (n > 1) for (let c = 1; c <= 7; c++) ws.mergeCells(FILA_ENC + 1 + i, c, FILA_ENC + i + n, c);
+  });
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement('a');
+  enlace.href = url;
+  enlace.download = `Resultados_Seguimiento_${ficha.numero_ficha}${sufijoArchivo(filtros)}.xlsx`;
+  document.body.appendChild(enlace);
+  enlace.click();
+  document.body.removeChild(enlace);
+  URL.revokeObjectURL(url);
+}
+
+/** PDF del Comparativo, semaforizado como en Seguimiento. */
 export function exportarResultadosSeguimientoPDF(ficha: Ficha, filas: FilaResultadoSeguimiento[], filtros: string[] = []) {
   const resumen = resumenConteo(filas);
+  const sem = resumenSemaforo(filas);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
   doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR', 40, 36);
   doc.setFontSize(11);
-  doc.text('Resultados de Seguimiento — Competencias y RAPs', 40, 54);
-
+  doc.text('Comparativo por Competencia & RAPs — Semáforo 70%-80%', 40, 54);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(`Ficha: ${ficha.numero_ficha} — ${ficha.programaNombre} (${ficha.modalidad})`, 40, 72);
-  doc.text(`Corte: ${new Date().toLocaleDateString('es-CO')}`, 40, 86);
+  doc.text(`Ficha: ${ficha.numero_ficha} — ${ficha.programaNombre} (${ficha.modalidad})   |   Corte: ${new Date().toLocaleDateString('es-CO')}`, 40, 72);
+
+  // Leyenda del semáforo con sus colores
+  let x = 40;
+  const leyenda: [string, string][] = [
+    ['OK', `${sem.ok} OK (70%-80%)`],
+    ['ALERTA_PROGRAMAR', `${sem.alerta} Alerta (<70%)`],
+    ['AVANZADO', `${sem.avanzado} Avanzada (>80%)`]
+  ];
+  leyenda.forEach(([k, t]) => {
+    const s = SEMAFORO_ESTILO[k];
+    const w = doc.getTextWidth(t) + 14;
+    doc.setFillColor(...s.rgbFondo);
+    doc.roundedRect(x, 80, w, 14, 3, 3, 'F');
+    doc.setTextColor(...s.rgbTexto);
+    doc.setFont('helvetica', 'bold');
+    doc.text(t, x + 7, 90);
+    x += w + 8;
+  });
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'normal');
   doc.text(
-    `RAPs: ${resumen.total} totales   |   ${resumen.pendientes} pendientes   |   ${resumen.enEjecucion} en ejecución   |   ${resumen.calificados} evaluados   |   ${resumen.sinCalificar} sin evaluar`,
-    40, 100
+    `RAPs: ${resumen.total}  |  ${resumen.pendientes} pendientes  |  ${resumen.enEjecucion} en ejecución  |  ${resumen.calificados} evaluados  |  ${resumen.sinCalificar} sin evaluar`,
+    x + 6, 90
   );
   doc.setFont('helvetica', filtros.length > 0 ? 'bold' : 'normal');
   if (filtros.length > 0) doc.setTextColor(13, 99, 27);
   const lineasFiltro = doc.splitTextToSize(textoFiltros(filtros), 760);
-  doc.text(lineasFiltro, 40, 114);
+  doc.text(lineasFiltro, 40, 110);
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'normal');
 
+  const spans = spansPorCompetencia(filas);
+  const body = filas.map((f, i) => {
+    const fila: any[] = [];
+    if (spans[i] > 0) {
+      const s = SEMAFORO_ESTILO[f.estadoSemaforoCompetencia];
+      fila.push({ content: `${f.competenciaCodigo}\n${f.competenciaDenominacion}\n(${f.competenciaTipo})`, rowSpan: spans[i] });
+      fila.push({ content: `${f.horasEjecutadasCompetencia}h / ${f.horasPlaneadasCompetencia}h`, rowSpan: spans[i], styles: { halign: 'center' } });
+      fila.push({
+        content: `${f.porcentajeEjecucionCompetencia}%\n${ETIQUETA_SEMAFORO[f.estadoSemaforoCompetencia] || ''}`,
+        rowSpan: spans[i],
+        styles: s ? { fillColor: s.rgbFondo, textColor: s.rgbTexto, fontStyle: 'bold', halign: 'center' } : {}
+      });
+    }
+    const e = ESTADO_RAP_ESTILO[f.estadoRap];
+    fila.push(`${f.rapCodigo}: ${f.rapDenominacion}`);
+    fila.push(f.instructorNombre || 'Sin asignar');
+    fila.push({
+      content: ETIQUETA_ESTADO_RAP[f.estadoRap] || f.estadoRap,
+      styles: e ? { fillColor: e.rgbFondo, textColor: e.rgbTexto, fontStyle: 'bold', halign: 'center' } : {}
+    });
+    return fila;
+  });
+
   autoTable(doc, {
-    startY: 122 + (lineasFiltro.length - 1) * 11,
-    head: [[
-      'Competencia', 'Tipo', '% Ejec. Comp.', 'Semáforo',
-      'RAP', 'Resultado de Aprendizaje', 'Instructor', 'Estado del RAP'
-    ]],
-    body: filas.map(f => [
-      `${f.competenciaCodigo}\n${f.competenciaDenominacion}`,
-      f.competenciaTipo,
-      `${f.porcentajeEjecucionCompetencia}%`,
-      ETIQUETA_SEMAFORO[f.estadoSemaforoCompetencia] || f.estadoSemaforoCompetencia,
-      f.rapCodigo,
-      f.rapDenominacion,
-      f.instructorNombre || 'Sin Asignar',
-      ETIQUETA_ESTADO_RAP[f.estadoRap] || f.estadoRap
-    ]),
-    styles: { fontSize: 7.5, cellPadding: 4, valign: 'top' },
+    startY: 120 + (lineasFiltro.length - 1) * 11,
+    head: [['Competencia', 'Ejecutadas / Planeadas', 'Semáforo', 'Resultado de Aprendizaje', 'Instructor', 'Estado del RAP']],
+    body,
+    styles: { fontSize: 7.5, cellPadding: 4, valign: 'top', lineColor: [226, 232, 240], lineWidth: 0.5 },
     headStyles: { fillColor: [13, 99, 27], textColor: 255, fontStyle: 'bold' },
     columnStyles: {
-      0: { cellWidth: 130 },
-      1: { cellWidth: 55 },
-      2: { cellWidth: 55 },
-      3: { cellWidth: 70 },
-      4: { cellWidth: 45 },
-      5: { cellWidth: 190 },
-      6: { cellWidth: 80 },
-      7: { cellWidth: 65 }
-    },
-    // Colorea la celda de Estado del RAP según su valor, para que se distinga
-    // de un vistazo igual que en la interfaz (verde=calificado, ámbar=en
-    // ejecución, gris=pendiente, rojo=sin calificar).
-    didParseCell: (data) => {
-      if (data.section === 'body' && data.column.index === 7) {
-        const valor = String(data.cell.raw);
-        if (valor === 'Evaluado') {
-          data.cell.styles.textColor = [13, 99, 27];
-          data.cell.styles.fontStyle = 'bold';
-        } else if (valor === 'En Ejecución') {
-          data.cell.styles.textColor = [180, 95, 6];
-          data.cell.styles.fontStyle = 'bold';
-        } else if (valor === 'Sin Evaluar') {
-          data.cell.styles.textColor = [190, 18, 60];
-          data.cell.styles.fontStyle = 'bold';
-        }
-      }
+      0: { cellWidth: 170 },
+      1: { cellWidth: 70 },
+      2: { cellWidth: 75 },
+      3: { cellWidth: 250 },
+      4: { cellWidth: 110 },
+      5: { cellWidth: 75 }
     }
   });
 
