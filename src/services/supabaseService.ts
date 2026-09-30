@@ -129,11 +129,29 @@ export async function insertFichaInSupabase(ficha: Ficha): Promise<SyncResult<an
       ({ data, error } = await supabase.from('fichas').insert([payload]).select());
     }
 
+    // El instructor líder todavía no existe en Supabase (p. ej. quedó solo en
+    // este navegador): se guarda la ficha sin líder en vez de perderla, y el
+    // líder se vuelve a vincular cuando el instructor se suba.
+    if (error && error.code === '23503' && /instructor_lider/i.test(`${error.message} ${error.details || ''}`)) {
+      payload.instructor_lider_id = null;
+      ({ data, error } = await supabase.from('fichas').insert([payload]).select());
+    }
+
     if (error) {
       const isRls = error.code === '42501' || error.message?.toLowerCase().includes('row-level security');
+      let detalle = error.message;
+      if (error.code === '23505' && /numero_ficha/i.test(`${error.message} ${error.details || ''}`)) {
+        detalle = `La ficha ${ficha.numero_ficha} ya existe en Supabase (número repetido).`;
+      } else if (error.code === '22007' || error.code === '22008') {
+        detalle = `Fecha inválida en la ficha ${ficha.numero_ficha} (inicio "${ficha.fechaInicio}" / fin "${ficha.fechaFin}").`;
+      } else if (error.code === '22P02') {
+        detalle = `Valor no válido para Supabase en la ficha ${ficha.numero_ficha}: ${error.message}`;
+      } else if (error.code === '22001') {
+        detalle = `Un texto de la ficha ${ficha.numero_ficha} es demasiado largo para su columna: ${error.message}`;
+      }
       return {
         success: false,
-        error: error.message,
+        error: detalle,
         isRlsError: isRls
       };
     }

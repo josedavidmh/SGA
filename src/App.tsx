@@ -708,7 +708,9 @@ export default function App() {
   const rapsRef = React.useRef<ResultadoAprendizaje[]>(raps);
   const usuariosRef = React.useRef<User[]>(usuarios);
   const instructoresRef = React.useRef<Instructor[]>(instructores);
+  const fichasRef = React.useRef<Ficha[]>([]);
   React.useEffect(() => { instructoresRef.current = instructores; }, [instructores]);
+  React.useEffect(() => { fichasRef.current = fichas; }, [fichas]);
   const rapsSeguimientoRef = React.useRef<RapSeguimiento[]>(rapsSeguimiento);
   React.useEffect(() => { rapsSeguimientoRef.current = rapsSeguimiento; }, [rapsSeguimiento]);
   const horariosRef = React.useRef<BloqueHorario[]>(horarios);
@@ -962,6 +964,26 @@ export default function App() {
           }
           return merged;
         });
+      }
+
+      // 2-bis. Fichas que solo existen en este navegador (su guardado en
+      // Supabase falló o nunca se hizo): se suben para que los demás usuarios
+      // las vean. Si ya existen allá con el mismo número, no se duplican.
+      {
+        const numerosEnDb = new Set((dbFichas || []).map(f => String(f.numero_ficha).trim()));
+        const pendientes = fichasRef.current.filter(f => f.numero_ficha && !numerosEnDb.has(String(f.numero_ficha).trim()));
+        const fallos: string[] = [];
+        for (const f of pendientes) {
+          const r = await insertFichaInSupabase(f);
+          if (!r.success && !/ya existe en Supabase/.test(r.error || '')) {
+            console.error(`No se pudo subir la ficha ${f.numero_ficha}:`, r.error);
+            fallos.push(`Ficha ${f.numero_ficha}: ${r.error}`);
+          }
+        }
+        if (fallos.length > 0 && !sessionStorage.getItem('aviso_fichas_no_subidas')) {
+          try { sessionStorage.setItem('aviso_fichas_no_subidas', '1'); } catch { /* sin storage */ }
+          alert(`Estas fichas solo existen en este navegador y NO se pudieron subir a Supabase:\n\n${fallos.join('\n')}`);
+        }
       }
 
       // 2a. Horas por competencia de cada ficha (Reporte de Instructores por
@@ -1471,7 +1493,12 @@ export default function App() {
   const handleCrearFicha = (nuevaFicha: Ficha) => {
     setFichas(prev => [nuevaFicha, ...prev]);
     setSelectedFicha(nuevaFicha);
-    insertFichaInSupabase(nuevaFicha).catch(err => {
+    insertFichaInSupabase(nuevaFicha).then(res => {
+      if (!res.success) {
+        console.error('Error al insertar ficha en Supabase:', res.error);
+        alert(`La ficha ${nuevaFicha.numero_ficha} quedó en este navegador, pero NO se guardó en Supabase:\n\n${res.error}\n\nSe reintentará automáticamente al sincronizar.`);
+      }
+    }).catch(err => {
       console.error('Error al insertar ficha en Supabase:', err);
     });
 
