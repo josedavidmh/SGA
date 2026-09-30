@@ -3,6 +3,7 @@ import { Users, Search, FileSpreadsheet, FileText, Calendar, Clock, ChevronDown,
 import { User, Instructor, BloqueHorario, Ficha, DiaSemana, FranjaHorario } from '../types';
 import { DIAS, FRANJAS } from './HorariosView';
 import { exportarHorariosPorInstructorExcel, exportarHorariosPorInstructorPDF, obtenerBloquesVacantes } from '../services/horariosReporteService';
+import { claveNombrePersona } from '../lib/nombresInstructor';
 
 interface ReportesInstructoresViewProps {
   currentUser: User;
@@ -38,21 +39,34 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
     const mapa = new Map<string, GrupoInstructor>();
     // Los bloques VACANTES (programados, sin instructor todavía) no tienen a
     // quién agrupar — se muestran aparte, en "Espacios Vacantes" más abajo.
+    // Se agrupa por PERSONA (nombre sin tildes, mayúsculas ni "Ing."), no por
+    // id: así un mismo instructor que quedó con dos registros o escrito
+    // distinto ("José David…" / "JOSE DAVID…") sale una sola vez.
     horarios.filter(b => b.instructorId).forEach(b => {
-      const key = b.instructorId!;
+      const key = claveNombrePersona(b.instructorNombre || '') || b.instructorId!;
       if (!mapa.has(key)) {
-        mapa.set(key, { instructorId: b.instructorId!, instructorNombre: b.instructorNombre!, bloques: [] });
+        const enPlanta = instructores.find(i => i.id === b.instructorId);
+        mapa.set(key, { instructorId: key, instructorNombre: enPlanta?.nombreCompleto || b.instructorNombre || 'Instructor', bloques: [] });
       }
       mapa.get(key)!.bloques.push(b);
     });
     return Array.from(mapa.values()).sort((a, b) => a.instructorNombre.localeCompare(b.instructorNombre));
-  }, [horarios]);
+  }, [horarios, instructores]);
 
+  const hayFiltro = busqueda.trim().length > 0;
   const gruposFiltrados = React.useMemo(() => {
-    const txt = busqueda.trim().toLowerCase();
+    const norm = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const txt = norm(busqueda.trim());
     if (!txt) return grupos;
-    return grupos.filter(g => g.instructorNombre.toLowerCase().includes(txt));
+    return grupos.filter(g => norm(g.instructorNombre).includes(txt));
   }, [grupos, busqueda]);
+
+  // Con filtro, todo (resumen y exportación) corresponde SOLO a los
+  // instructores filtrados.
+  const bloquesFiltrados = React.useMemo(
+    () => (hayFiltro ? gruposFiltrados.flatMap(g => g.bloques) : horarios),
+    [hayFiltro, gruposFiltrados, horarios]
+  );
 
   // Espacios ya programados (RAP/día/franja/ficha) pero sin instructor —
   // pendientes de cubrir cuando llegue alguien disponible.
@@ -62,8 +76,8 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
       (ORDEN_DIA[a.diaSemana] - ORDEN_DIA[b.diaSemana]) || (ORDEN_FRANJA[a.franja] - ORDEN_FRANJA[b.franja])
     ), [bloquesVacantes]);
 
-  const totalHorasSistema = horarios.reduce((acc, b) => acc + b.duracionHoras, 0);
-  const totalFichasConHorario = new Set(horarios.map(b => b.fichaId)).size;
+  const totalHorasSistema = bloquesFiltrados.reduce((acc, b) => acc + b.duracionHoras, 0);
+  const totalFichasConHorario = new Set(bloquesFiltrados.map(b => b.fichaId)).size;
 
   const toggleExpandido = (key: string) => setExpandido(prev => ({ ...prev, [key]: !prev[key] }));
 
@@ -108,7 +122,7 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => exportarHorariosPorInstructorExcel(horarios, DIAS, FRANJAS, fichasPorId)}
+            onClick={() => exportarHorariosPorInstructorExcel(bloquesFiltrados, DIAS, FRANJAS, fichasPorId)}
             className="flex items-center space-x-1.5 bg-[#0D631B] hover:bg-[#0a4d15] text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition-all"
           >
             <FileSpreadsheet className="w-4 h-4" />
@@ -116,7 +130,7 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
           </button>
           <button
             type="button"
-            onClick={() => exportarHorariosPorInstructorPDF(horarios, DIAS, FRANJAS, fichasPorId)}
+            onClick={() => exportarHorariosPorInstructorPDF(bloquesFiltrados, DIAS, FRANJAS, fichasPorId)}
             className="flex items-center space-x-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-all"
           >
             <FileText className="w-4 h-4 text-red-500" />
@@ -129,7 +143,7 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Instructores con Bloques</div>
-          <div className="text-xl font-black text-[#111C2D]">{grupos.length} <span className="text-xs font-semibold text-slate-400">/ {instructores.length}</span></div>
+          <div className="text-xl font-black text-[#111C2D]">{hayFiltro ? gruposFiltrados.length : grupos.length} <span className="text-xs font-semibold text-slate-400">/ {instructores.length}</span></div>
         </div>
         <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Fichas con Horario Activo</div>
@@ -147,7 +161,7 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
 
       {/* Espacios Vacantes: RAP/competencia ya programado en un horario, pero
           todavía sin instructor — quedan aquí visibles hasta que se cubran. */}
-      {bloquesVacantes.length > 0 && (
+      {bloquesVacantes.length > 0 && !hayFiltro && (
         <div className="bg-white rounded-2xl border border-amber-200 shadow-xs overflow-hidden">
           <div className="p-4 bg-amber-50 border-b border-amber-200 flex items-center space-x-2.5">
             <AlertOctagon className="w-5 h-5 text-amber-700 shrink-0" />
@@ -223,7 +237,8 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
               .map(id => fichasPorId[id])
               .filter((f): f is Ficha => !!f);
             const inst = instructores.find(i => i.id === g.instructorId);
-            const abierto = !!expandido[g.instructorId || g.instructorNombre];
+            // Al filtrar (pocos resultados) el horario se muestra abierto de una vez.
+            const abierto = !!expandido[g.instructorId || g.instructorNombre] || (hayFiltro && gruposFiltrados.length <= 3);
             const bloquesOrdenados = [...g.bloques].sort((a, b) =>
               (ORDEN_DIA[a.diaSemana] - ORDEN_DIA[b.diaSemana]) || (ORDEN_FRANJA[a.franja] - ORDEN_FRANJA[b.franja])
             );

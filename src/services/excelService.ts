@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { Ficha, BloqueHorario, ActividadSeguimiento, RegionalCentro } from '../types';
+import { totalMatriculados } from '../lib/aprendices';
 
 export function generarReporteEventosF001(
   ficha: Ficha,
@@ -22,7 +23,7 @@ export function generarReporteEventosF001(
     ['NIVEL DE FORMACIÓN:', ficha.nivelFormacion, '', 'MODALIDAD:', ficha.modalidad],
     ['INSTRUCTOR LÍDER:', ficha.instructorLiderNombre, '', 'EMAIL LÍDER:', ficha.instructorLiderEmail],
     ['PERIODO LECTIVO:', ficha.periodoLectivo, '', 'FECHAS:', `${ficha.fechaInicio} a ${ficha.fechaFin}`],
-    ['ESTADO FICHA:', ficha.estado, '', 'APRENDICES ACTIVOS:', `${ficha.aprendicesActivos} de ${ficha.matriculaInicial}`],
+    ['ESTADO FICHA:', ficha.estado, '', 'APRENDICES ACTIVOS:', `${ficha.aprendicesActivos} de ${totalMatriculados(ficha)}`],
     [],
     ['3. BALANCE HORARIO EJECUTADO'],
     ['HORAS LECTIVAS TOTALES:', ficha.horasDirectasTotales, '', 'HORAS ETAPA PRODUCTIVA:', ficha.horasIndependientesTotales],

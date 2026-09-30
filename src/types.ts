@@ -35,6 +35,8 @@ export interface ProgramaFormacion {
   fichasAsociadasCount?: number;
 }
 
+export type JornadaAmbiente = 'Mañana' | 'Tarde' | 'Noche';
+
 export interface Ficha {
   id: string;
   numero_ficha: string;
@@ -47,6 +49,8 @@ export interface Ficha {
   instructorLiderEmail: string;
   modalidad: 'Presencial Diurna' | 'Presencial Nocturna' | 'Mixta / Virtual';
   ambientePrincipal: string;
+  /** Jornada en la que la ficha usa su ambiente base (ver lib/ambientes.ts). */
+  jornadaAmbiente?: JornadaAmbiente;
   /** Excepciones de ambiente por día: { "<trimestre>|<día>": "<ambiente>" } (ver lib/ambientes.ts). */
   ambientesExcepcion?: Record<string, string>;
   periodoLectivo: string;
@@ -60,6 +64,8 @@ export interface Ficha {
   aprendicesRetiroVoluntario?: number;
   aprendicesCondicionados?: number;
   aprendicesTrasladados?: number;
+  /** Total de aprendices del último cargue de Juicios (activos + inactivos). */
+  totalAprendicesActual?: number;
   tasaRetencion?: number;
   tasaDesercion?: number;
   estado: 'ACTIVA' | 'POR_CERRAR' | 'CERRADA';
@@ -117,7 +123,7 @@ export interface AmbienteAprendizaje {
   id: string;
   nombre: string;
   codigo: string;
-  tipo: 'Ambiente TIC' | 'Laboratorio' | 'Taller' | 'Auditorio' | 'Virtual';
+  tipo: 'Ambiente TIC' | 'Convencional' | 'Laboratorio' | 'Taller' | 'Auditorio' | 'Virtual';
   sede: string;
   capacidadAprendices: number;
   equipamiento?: string;

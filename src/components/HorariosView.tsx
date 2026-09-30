@@ -48,8 +48,10 @@ import {
   RapSeguimiento,
   RegistroHorasEjecutadas,
   ActividadSeguimiento,
-  AmbienteAprendizaje
+  AmbienteAprendizaje,
+  TrimestreCalendario
 } from '../types';
+import { fechasDeCorteTrimestre } from '../lib/calendarioTrimestres';
 import { ambienteDelDia, ambienteEfectivo, buscarChoqueAmbiente, excepcionDelDia, origenAmbiente } from '../lib/ambientes';
 import { calcularComparativoCompetencias } from '../services/horasEjecutadasService';
 import { dialogo } from './DialogoSistema';
@@ -80,6 +82,8 @@ interface HorariosProps {
   puedeEditar?: boolean;
   /** Catálogo de ambientes (Parametrizaciones) para las excepciones. */
   ambientesCatalogo?: AmbienteAprendizaje[];
+  /** Calendario institucional de trimestres (Parametrizaciones): fechas de corte de cada bloque. */
+  trimestresCalendario?: TrimestreCalendario[];
   /** TODAS las fichas (para detectar si un ambiente ya lo ocupa otra ficha). */
   todasLasFichas?: Ficha[];
   onCambiarAmbienteDia?: (fichaId: string, trimestre: string, dia: DiaSemana, ambiente: string | null) => { exito: boolean; mensaje: string };
@@ -173,6 +177,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   actividades = [],
   puedeEditar,
   ambientesCatalogo = [],
+  trimestresCalendario = [],
   todasLasFichas,
   onCambiarAmbienteDia,
   onCambiarAmbienteBloque,
@@ -720,8 +725,10 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
       })),
       esCompetenciaCompleta: isCompetenciaCompleta,
       duracionHoras: 3,
-      fechaCorteInicio: '2026-07-01',
-      fechaCorteFin: '2026-09-30',
+      // Fechas de corte del trimestre en el que se programa: las del calendario
+      // de Parametrizaciones o, si ese trimestre no está allí, las naturales.
+      fechaCorteInicio: fechasDeCorteTrimestre(trimestresCalendario, trimestreSeleccionado || ficha.periodoLectivo).inicio,
+      fechaCorteFin: fechasDeCorteTrimestre(trimestresCalendario, trimestreSeleccionado || ficha.periodoLectivo).fin,
       // El bloque se guarda en el trimestre que se está viendo/editando —
       // normalmente el actual de la ficha, pero puede ser otro si se está
       // pre-programando un trimestre futuro sin haber avanzado la ficha todavía.
@@ -1077,6 +1084,20 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
           >
             <ChevronRight className="w-4 h-4" />
           </button>
+
+          {/* Rango de fechas del trimestre elegido, tomado de Parametrizaciones */}
+          {(() => {
+            const r = fechasDeCorteTrimestre(trimestresCalendario, trimestreSeleccionado);
+            return r.parametrizado ? (
+              <span className="text-[11px] font-semibold text-slate-500 ml-1" title="Fechas de corte configuradas en Parametrizaciones → Trimestres">
+                {r.inicio} → {r.fin}
+              </span>
+            ) : (
+              <span className="text-[11px] font-semibold text-amber-700 ml-1" title="Este trimestre no está en Parametrizaciones → Trimestres; se usan fechas por defecto">
+                Sin fechas parametrizadas ({r.inicio} → {r.fin})
+              </span>
+            );
+          })()}
         </div>
 
       </div>

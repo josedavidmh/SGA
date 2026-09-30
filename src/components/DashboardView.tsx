@@ -17,7 +17,9 @@ import {
 } from 'lucide-react';
 import { Ficha, User, BloqueHorario, ActividadSeguimiento, RegionalCentro, RapSeguimiento, ResultadoAprendizaje, TrimestreCalendario } from '../types';
 import { generarFormatoAsociacionFichas, generarFormatoEventos } from '../services/reportesOficialesService';
+import { aplicarCalendarioABloques } from '../lib/calendarioTrimestres';
 import { obtenerTrimestresDisponibles } from '../services/ambientesReporteService';
+import { totalMatriculados } from '../lib/aprendices';
 
 interface DashboardProps {
   currentUser: User;
@@ -99,7 +101,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
       return;
     }
     const catalogoRapsPrograma = raps.filter(r => r.programaCodigo === f.programaCodigo);
-    generarFormatoEventos(f, centro, bloquesTrimestre, catalogoRapsPrograma, etiquetaTrimestre(trimestre)).then(resultado => {
+    generarFormatoEventos(f, centro, aplicarCalendarioABloques(bloquesTrimestre, trimestresCalendario), catalogoRapsPrograma, etiquetaTrimestre(trimestre)).then(resultado => {
       if (resultado.festivosTotalesExcluidos > 0) {
         alert(`Reporte generado. Se excluyeron ${resultado.festivosTotalesExcluidos} ocurrencia(s) por caer en día festivo colombiano.`);
       }
@@ -368,7 +370,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
               {fichaLider.tasaRetencion}%
             </div>
             <p className="text-[11px] text-slate-500 mt-1 font-medium">
-              {fichaLider.aprendicesActivos} activos de {fichaLider.matriculaInicial} matriculados
+              {fichaLider.aprendicesActivos} activos de {totalMatriculados(fichaLider)} matriculados
             </p>
           </div>
 

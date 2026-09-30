@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Ficha, BloqueHorario, AmbienteAprendizaje } from '../types';
-import { ambienteEfectivo, esAmbienteGenerico, normalizarAmbiente } from '../lib/ambientes';
+import { ambienteEfectivo, esAmbienteGenerico, normalizarAmbiente, jornadaDeFranja, ocupaAmbiente, fichaVencida, rangosSeSolapan, ORDEN_JORNADA } from '../lib/ambientes';
 
 const COLOR_ENCABEZADO: [number, number, number] = [13, 99, 27];
 
@@ -178,6 +178,17 @@ export interface FichaEnAmbiente {
   horario: string;
   bloques: number;
   horas: number;
+  /** BASE: jornada asignada a la ficha en su ambiente ('' si aún no la tiene).
+   *  EXCEPCION: jornadas en las que ocurre lo programado allí. */
+  jornada: string;
+  /** BASE sin jornada asignada todavía. */
+  sinJornada?: boolean;
+  /** BASE: otra ficha vigente comparte este ambiente, esta jornada y fechas que se cruzan. */
+  duplicada?: boolean;
+  /** La etapa lectiva de la ficha ya terminó: libera su ambiente. */
+  vencida?: boolean;
+  fechaInicio?: string;
+  fechaFin?: string;
 }
 
 export interface AmbienteConFichas {
@@ -188,6 +199,10 @@ export interface AmbienteConFichas {
   estado?: string;
   fichas: FichaEnAmbiente[];
   horasTotales: number;
+  /** Jornadas del ambiente base que aún están libres (Mañana / Tarde / Noche). */
+  jornadasLibres: string[];
+  /** Cantidad de fichas base en conflicto (misma jornada). */
+  conflictos: number;
 }
 
 export function calcularAmbientesConFichas(
@@ -206,7 +221,7 @@ export function calcularAmbientesConFichas(
       mapa.set(k, {
         ambiente: cat?.nombre || nombre,
         tipo: cat?.tipo, sede: cat?.sede, capacidad: cat?.capacidadAprendices, estado: cat?.estado,
-        fichas: [], horasTotales: 0
+        fichas: [], horasTotales: 0, jornadasLibres: [], conflictos: 0
       });
     }
     return mapa.get(k)!;
@@ -222,7 +237,8 @@ export function calcularAmbientesConFichas(
     const k = `${clave(f.ambientePrincipal)}__${f.id}`;
     acumulado.set(k, {
       fichaId: f.id, fichaNumero: f.numero_ficha, programaNombre: f.programaNombre,
-      uso: 'BASE', horario: '', bloques: 0, horas: 0, celdas: []
+      uso: 'BASE', horario: '', bloques: 0, horas: 0, celdas: [],
+      jornada: f.jornadaAmbiente || '', sinJornada: !f.jornadaAmbiente
     });
     obtener(f.ambientePrincipal);
   });
@@ -239,7 +255,7 @@ export function calcularAmbientesConFichas(
       if (!acumulado.has(k)) {
         acumulado.set(k, {
           fichaId: f.id, fichaNumero: f.numero_ficha, programaNombre: f.programaNombre,
-          uso: 'EXCEPCION', horario: '', bloques: 0, horas: 0, celdas: []
+          uso: 'EXCEPCION', horario: '', bloques: 0, horas: 0, celdas: [], jornada: ''
         });
       }
       acumulado.get(k)!.celdas.push(`${dia}|DIA|${t}`);
@@ -259,8 +275,10 @@ export function calcularAmbientesConFichas(
         acumulado.set(k, {
           fichaId: b.fichaId, fichaNumero: f?.numero_ficha || b.fichaId, programaNombre: f?.programaNombre || '',
           uso: f && clave(f.ambientePrincipal) === clave(amb) ? 'BASE' : 'EXCEPCION',
-          horario: '', bloques: 0, horas: 0, celdas: []
+          horario: '', bloques: 0, horas: 0, celdas: [], jornada: '',
+          sinJornada: f && clave(f.ambientePrincipal) === clave(amb) ? !f.jornadaAmbiente : undefined
         });
+        if (f && clave(f.ambientePrincipal) === clave(amb)) acumulado.get(k)!.jornada = f.jornadaAmbiente || '';
       }
       const item = acumulado.get(k)!;
       item.bloques += 1;
@@ -289,14 +307,44 @@ export function calcularAmbientesConFichas(
           const franjaTxt = fr === 'DIA' ? 'día completo' : fr.replace(/\s/g, '');
           return `${ABREV_DIA[d] || d} ${franjaTxt}${trimestreFiltro === 'TODOS' ? ` (${t})` : ''}`;
         }).join(', ');
+    // Jornada de lo programado como excepción: la de sus franjas (o todo el día).
+    if (item.uso === 'EXCEPCION') {
+      const js = new Set<string>();
+      item.celdas.forEach(c => { const fr = c.split('|')[1]; js.add(fr === 'DIA' ? 'Todo el día' : jornadaDeFranja(fr)); });
+      item.jornada = js.has('Todo el día') ? 'Todo el día' : [...js].sort((a, b) => (ORDEN_JORNADA[a] ?? 9) - (ORDEN_JORNADA[b] ?? 9)).join(' / ');
+    }
+    const fichaItem = fichaPorId.get(item.fichaId);
+    item.fechaInicio = fichaItem?.fechaInicio;
+    item.fechaFin = fichaItem?.fechaFin;
+    item.vencida = !!fichaItem && (fichaVencida(fichaItem) || fichaItem.estado === 'CERRADA');
+    if (item.vencida) item.sinJornada = false;
     const { celdas: _c, ...limpio } = item;
     destino.fichas.push(limpio);
     destino.horasTotales += item.horas;
   });
 
-  mapa.forEach(a => a.fichas.sort((x, y) => (x.uso === y.uso ? x.fichaNumero.localeCompare(y.fichaNumero) : x.uso === 'BASE' ? -1 : 1)));
+  // Conflictos: dos fichas vigentes con el mismo ambiente base en la misma jornada y
+  // con etapas lectivas que se cruzan. Las de etapa lectiva vencida liberan el ambiente.
+  mapa.forEach(a => {
+    const vigentes = a.fichas.filter(f => f.uso === 'BASE' && f.jornada && !f.vencida);
+    vigentes.forEach(f => {
+      if (vigentes.some(o => o !== f && o.jornada === f.jornada && rangosSeSolapan(o, f))) f.duplicada = true;
+    });
+    a.conflictos = a.fichas.filter(f => f.duplicada).length;
+    const ocupadas = new Set(vigentes.map(f => f.jornada));
+    a.jornadasLibres = ['Mañana', 'Tarde', 'Noche'].filter(j => !ocupadas.has(j));
+  });
+
+  mapa.forEach(a => a.fichas.sort((x, y) => {
+    if (x.uso !== y.uso) return x.uso === 'BASE' ? -1 : 1;
+    const jo = (ORDEN_JORNADA[x.jornada] ?? 9) - (ORDEN_JORNADA[y.jornada] ?? 9);
+    return jo || x.fichaNumero.localeCompare(y.fichaNumero);
+  }));
   return Array.from(mapa.values()).sort((a, b) => a.ambiente.localeCompare(b.ambiente));
 }
+
+const alertaFicha = (f: FichaEnAmbiente) =>
+  f.duplicada ? 'Ambiente duplicado en la jornada' : f.vencida && f.uso === 'BASE' ? 'Etapa lectiva finalizada' : f.uso === 'BASE' && f.sinJornada ? 'Falta asignar jornada' : '';
 
 export function exportarAmbientesConFichasExcel(items: AmbienteConFichas[], trimestreFiltro: string = 'TODOS') {
   const wsData: (string | number)[][] = [
@@ -304,20 +352,21 @@ export function exportarAmbientesConFichasExcel(items: AmbienteConFichas[], trim
     [trimestreFiltro === 'TODOS' ? 'Todos los trimestres' : `Trimestre: ${trimestreFiltro}`],
     [`AMBIENTES: ${items.length} | CON FICHAS: ${items.filter(i => i.fichas.length > 0).length}`],
     [],
-    ['AMBIENTE', 'TIPO', 'SEDE', 'CAPACIDAD', 'FICHA', 'PROGRAMA', 'USO', 'DÍAS Y FRANJAS', 'BLOQUES', 'HORAS/SEM']
+    ['AMBIENTE', 'TIPO', 'SEDE', 'CAPACIDAD', 'FICHA', 'PROGRAMA', 'USO', 'JORNADA', 'DÍAS Y FRANJAS', 'BLOQUES', 'HORAS/SEM', 'ALERTA']
   ];
   items.forEach(a => {
     if (a.fichas.length === 0) {
-      wsData.push([a.ambiente, a.tipo || '', a.sede || '', a.capacidad ?? '', '—', 'Libre', '', '', 0, 0]);
+      wsData.push([a.ambiente, a.tipo || '', a.sede || '', a.capacidad ?? '', '—', 'Libre', '', '', '', 0, 0, '']);
       return;
     }
     a.fichas.forEach(f => wsData.push([
       a.ambiente, a.tipo || '', a.sede || '', a.capacidad ?? '',
-      f.fichaNumero, f.programaNombre, f.uso === 'BASE' ? 'Base' : 'Excepción', f.horario, f.bloques, f.horas
+      f.fichaNumero, f.programaNombre, f.uso === 'BASE' ? 'Base' : 'Excepción', f.jornada || (f.uso === 'BASE' ? 'Sin jornada' : ''),
+      f.horario, f.bloques, f.horas, alertaFicha(f)
     ]));
   });
   const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 36 }, { wch: 11 }, { wch: 50 }, { wch: 9 }, { wch: 10 }];
+  ws['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 36 }, { wch: 11 }, { wch: 14 }, { wch: 50 }, { wch: 9 }, { wch: 10 }, { wch: 26 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Ambientes y Fichas');
   XLSX.writeFile(wb, `Ambientes_y_Fichas_${trimestreFiltro === 'TODOS' ? 'Todos' : trimestreFiltro}.xlsx`);
@@ -336,24 +385,25 @@ export function exportarAmbientesConFichasPDF(items: AmbienteConFichas[], trimes
   const body: (string | number)[][] = [];
   items.forEach(a => {
     if (a.fichas.length === 0) {
-      body.push([a.ambiente, '—', 'Libre', '', '']);
+      body.push([a.ambiente, '—', 'Libre', '', '', '']);
       return;
     }
     a.fichas.forEach((f, i) => body.push([
       i === 0 ? a.ambiente : '',
       `${f.fichaNumero}\n${f.programaNombre}`,
       f.uso === 'BASE' ? 'Base' : 'Excepción',
-      f.horario,
+      f.jornada || (f.uso === 'BASE' ? 'Sin jornada' : '—'),
+      f.horario + (alertaFicha(f) ? `\n⚠ ${alertaFicha(f)}` : ''),
       `${f.horas}h`
     ]));
   });
   autoTable(doc, {
     startY: 84,
-    head: [['Ambiente', 'Ficha / Programa', 'Uso', 'Días y franjas', 'Horas/sem']],
+    head: [['Ambiente', 'Ficha / Programa', 'Uso', 'Jornada', 'Días y franjas', 'Horas/sem']],
     body,
     styles: { fontSize: 7.5, cellPadding: 4, valign: 'top' },
     headStyles: { fillColor: COLOR_ENCABEZADO, textColor: 255, fontStyle: 'bold' },
-    columnStyles: { 0: { cellWidth: 150, fontStyle: 'bold' }, 1: { cellWidth: 190 }, 2: { cellWidth: 60 }, 3: { cellWidth: 300 }, 4: { cellWidth: 60 } },
+    columnStyles: { 0: { cellWidth: 150, fontStyle: 'bold' }, 1: { cellWidth: 190 }, 2: { cellWidth: 55 }, 3: { cellWidth: 60 }, 4: { cellWidth: 245 }, 5: { cellWidth: 50 } },
     didParseCell: (data) => {
       if (data.section === 'body' && data.column.index === 2 && String(data.cell.raw) === 'Excepción') {
         data.cell.styles.textColor = [109, 40, 217];

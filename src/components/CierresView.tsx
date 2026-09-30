@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Ficha, RegionalCentro, User } from '../types';
+import { totalMatriculados } from '../lib/aprendices';
+import { ReporteCierresIndicadores } from './ReporteCierresIndicadores';
 
 interface CierresProps {
   currentUser: User;
@@ -72,7 +74,8 @@ export const CierresView: React.FC<CierresProps> = ({
   };
 
   // Cálculo desasistido de fórmulas institucionales (PRD 3.4)
-  const matricula = ficha?.matriculaInicial || 35;
+  // Matriculados actuales de la ficha (último cargue de Juicios; si no hay, la matrícula inicial).
+  const matricula = (ficha ? totalMatriculados(ficha) : 0) || 35;
   // Retención: mientras la ficha está en formación (aún sin culminados
   // registrados) se calcula con los aprendices que SIGUEN EN FORMACIÓN
   // (último cargue de Juicios). Al registrar culminados en el cierre, se
@@ -95,9 +98,9 @@ export const CierresView: React.FC<CierresProps> = ({
     let totalMatricula = 0, totalCulminados = 0, totalCancelados = 0, totalAplazados = 0, totalRetiros = 0;
     let totalBaseRetencion = 0;
     fichasPrograma.forEach(f => {
-      totalMatricula += f.matriculaInicial || 0;
+      totalMatricula += totalMatriculados(f);
       const culm = f.id === ficha.id ? culminados : (f.aprendicesCulminados || 0);
-      totalBaseRetencion += culm > 0 ? culm : (f.aprendicesActivos ?? f.matriculaInicial ?? 0);
+      totalBaseRetencion += culm > 0 ? culm : (f.aprendicesActivos ?? totalMatriculados(f));
       if (f.id === ficha.id) {
         totalCulminados += culminados;
         totalCancelados += cancelados;
@@ -123,6 +126,16 @@ export const CierresView: React.FC<CierresProps> = ({
       tasaDesercionPrograma: totalMatricula > 0 ? Number((((totalCancelados + totalRetiros) / totalMatricula) * 100).toFixed(1)) : 0
     };
   }, [ficha, allFichas, culminados, cancelados, aplazados, retiros]);
+
+  // Para el reporte: la ficha que se está trabajando entra con los valores del
+  // formulario de cierre (culminados, cancelados, aplazados, retiros), aunque
+  // todavía no se hayan consolidado — lo que se escribe aquí prevalece.
+  const fichasConFormulario = React.useMemo(
+    () => allFichas.map(f => f.id === ficha?.id
+      ? { ...f, aprendicesCulminados: culminados, aprendicesCancelados: cancelados, aprendicesAplazados: aplazados, aprendicesRetiroVoluntario: retiros }
+      : f),
+    [allFichas, ficha?.id, culminados, cancelados, aplazados, retiros]
+  );
 
   const handleGuardarCierre = (e: React.FormEvent) => {
     e.preventDefault();
@@ -399,6 +412,22 @@ export const CierresView: React.FC<CierresProps> = ({
         </form>
       </div>
 
+      {/* Reporte (Excel y PDF) del programa de la ficha seleccionada, con sus fichas,
+          histórico o por año. El global de todos los programas está en Reportes. */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs">
+        <ReporteCierresIndicadores
+          allFichas={fichasConFormulario}
+          centro={centro}
+          alcanceInicial="PROGRAMA"
+          alcanceFijo
+          programaInicial={ficha.programaCodigo || ficha.programaNombre}
+          programaFijo
+        />
+        <p className="text-[11px] text-slate-400 mt-3">
+          El reporte usa los valores del formulario de cierre aunque no los hayas consolidado. El global de todos los programas se saca en Reportes → Retención y Deserción.
+        </p>
+      </div>
+
       {/* Consolidado por Cohortes del Centro */}
       <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-3">
         <div className="flex items-center justify-between">
@@ -426,7 +455,7 @@ export const CierresView: React.FC<CierresProps> = ({
                 <tr key={f.id} className="hover:bg-[#F8F9FA] transition-colors">
                   <td className="py-3 font-bold text-[#111C2D]">{f.numero_ficha}</td>
                   <td className="py-3 font-medium text-slate-600 truncate max-w-xs">{f.programaNombre}</td>
-                  <td className="py-3 font-bold text-slate-700">{f.matriculaInicial}</td>
+                  <td className="py-3 font-bold text-slate-700">{totalMatriculados(f)}</td>
                   <td className="py-3 text-[#2E7D32] font-bold">{f.aprendicesCulminados || f.aprendicesActivos}</td>
                   <td className="py-3 text-[#BA1A1A] font-medium">{(f.aprendicesCancelados || 0) + (f.aprendicesRetiroVoluntario || 0)}</td>
                   <td className="py-3">

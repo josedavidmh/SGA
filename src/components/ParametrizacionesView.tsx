@@ -99,7 +99,7 @@ export const ParametrizacionesView: React.FC<ParametrizacionesViewProps> = ({
   const [formAmbiente, setFormAmbiente] = React.useState({
     nombre: '',
     codigo: '',
-    tipo: 'Ambiente TIC' as 'Ambiente TIC' | 'Laboratorio' | 'Taller' | 'Auditorio' | 'Virtual',
+    tipo: 'Ambiente TIC' as AmbienteAprendizaje['tipo'],
     sede: centro.sede || 'Sede Principal',
     capacidadAprendices: 30,
     equipamiento: '',
@@ -930,6 +930,7 @@ export const ParametrizacionesView: React.FC<ParametrizacionesViewProps> = ({
                     className="w-full bg-[#F8F9FA] border border-slate-200 rounded-xl px-3 py-2 font-medium text-[#111C2D] outline-none"
                   >
                     <option value="Ambiente TIC">Ambiente TIC</option>
+                    <option value="Convencional">Convencional</option>
                     <option value="Laboratorio">Laboratorio</option>
                     <option value="Taller">Taller</option>
                     <option value="Auditorio">Auditorio</option>

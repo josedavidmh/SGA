@@ -1,6 +1,8 @@
 import React from 'react';
-import { FileBarChart2, Users, MapPin, FileSpreadsheet, FileText, AlertTriangle } from 'lucide-react';
-import { User, Instructor, BloqueHorario, Ficha, AmbienteAprendizaje } from '../types';
+import { FileBarChart2, Users, MapPin, FileSpreadsheet, FileText, AlertTriangle, CalendarRange, TrendingUp } from 'lucide-react';
+import { ReporteCierresIndicadores } from './ReporteCierresIndicadores';
+import { ReporteProgramacionTrimestre } from './ReporteProgramacionTrimestre';
+import { User, Instructor, BloqueHorario, Ficha, AmbienteAprendizaje, RegionalCentro } from '../types';
 import { ReportesInstructoresView } from './ReportesInstructoresView';
 import {
   obtenerTrimestresDisponibles,
@@ -16,16 +18,17 @@ interface ReportesViewProps {
   allFichas: Ficha[];
   /** Catálogo de ambientes (Parametrizaciones). */
   ambientes?: AmbienteAprendizaje[];
+  centro?: RegionalCentro;
 }
 
-type SubTabReportes = 'INSTRUCTOR' | 'AMBIENTES';
+type SubTabReportes = 'PROGRAMACION' | 'INSTRUCTOR' | 'AMBIENTES' | 'CIERRES';
 
 // Sección única que agrupa todos los reportes del sistema (antes vivían
 // sueltos: "Horarios por Instructor" era su propia entrada de menú). Cada
 // reporte queda como una pestaña interna aquí para que crecer la lista de
 // reportes no siga inflando el menú lateral.
 export const ReportesView: React.FC<ReportesViewProps> = (props) => {
-  const [subTab, setSubTab] = React.useState<SubTabReportes>('INSTRUCTOR');
+  const [subTab, setSubTab] = React.useState<SubTabReportes>('PROGRAMACION');
 
   return (
     <div className="space-y-5 pb-12 animate-in fade-in duration-200">
@@ -42,7 +45,17 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
       </div>
 
       {/* Selector de reporte */}
-      <div className="flex items-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-200/80 shadow-xs w-fit">
+      <div className="flex items-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-200/80 shadow-xs w-fit flex-wrap">
+        <button
+          type="button"
+          onClick={() => setSubTab('PROGRAMACION')}
+          className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+            subTab === 'PROGRAMACION' ? 'bg-[#0D631B] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <CalendarRange className="w-4 h-4" />
+          <span>Programación por Trimestre</span>
+        </button>
         <button
           type="button"
           onClick={() => setSubTab('INSTRUCTOR')}
@@ -63,7 +76,21 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
           <MapPin className="w-4 h-4" />
           <span>Ambientes y sus Fichas</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('CIERRES')}
+          className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+            subTab === 'CIERRES' ? 'bg-[#0D631B] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" />
+          <span>Retención y Deserción</span>
+        </button>
       </div>
+
+      {subTab === 'PROGRAMACION' && (
+        <ReporteProgramacionTrimestre horarios={props.horarios} allFichas={props.allFichas} />
+      )}
 
       {subTab === 'INSTRUCTOR' && (
         <ReportesInstructoresView
@@ -72,6 +99,10 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
           horarios={props.horarios}
           allFichas={props.allFichas}
         />
+      )}
+
+      {subTab === 'CIERRES' && (
+        <ReporteCierresIndicadores allFichas={props.allFichas} centro={props.centro} alcanceInicial="GLOBAL" alcanceFijo />
       )}
 
       {subTab === 'AMBIENTES' && (
@@ -96,6 +127,7 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
   const [trimestreFiltro, setTrimestreFiltro] = React.useState<string>(() => trimestresDisponibles[0] || 'TODOS');
   const [busqueda, setBusqueda] = React.useState('');
   const [soloConExcepciones, setSoloConExcepciones] = React.useState(false);
+  const [soloConAlertas, setSoloConAlertas] = React.useState(false);
 
   const items = React.useMemo(
     () => calcularAmbientesConFichas(allFichas, horarios, ambientes, trimestreFiltro),
@@ -106,12 +138,15 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
     const q = busqueda.trim().toLowerCase();
     return items.filter(a => {
       if (soloConExcepciones && !a.fichas.some(f => f.uso === 'EXCEPCION')) return false;
+      if (soloConAlertas && !a.fichas.some(f => f.duplicada || (f.uso === 'BASE' && f.sinJornada))) return false;
       if (!q) return true;
       return a.ambiente.toLowerCase().includes(q) || a.fichas.some(f => f.fichaNumero.includes(q) || f.programaNombre.toLowerCase().includes(q));
     });
-  }, [items, busqueda, soloConExcepciones]);
+  }, [items, busqueda, soloConExcepciones, soloConAlertas]);
 
   const libres = items.filter(a => a.fichas.length === 0).length;
+  const duplicados = items.reduce((acc, a) => acc + a.conflictos, 0);
+  const sinJornada = items.reduce((acc, a) => acc + a.fichas.filter(f => f.uso === 'BASE' && f.sinJornada).length, 0);
   const excepciones = items.reduce((acc, a) => acc + a.fichas.filter(f => f.uso === 'EXCEPCION').length, 0);
 
   return (
@@ -155,7 +190,7 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
       </div>
 
       {/* Resumen */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Ambientes</div>
           <div className="text-xl font-black text-[#111C2D]">{items.length} <span className="text-xs font-semibold text-slate-400">({libres} libres)</span></div>
@@ -167,6 +202,11 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
         <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Usos por excepción</div>
           <div className="text-xl font-black text-violet-700">{excepciones}</div>
+        </div>
+        <div className={`p-4 rounded-2xl border shadow-xs ${duplicados > 0 || sinJornada > 0 ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200/80'}`}>
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Por corregir</div>
+          <div className={`text-xl font-black ${duplicados > 0 ? 'text-rose-700' : 'text-slate-700'}`}>{duplicados} <span className="text-xs font-semibold text-slate-500">duplicadas</span></div>
+          <div className="text-[10px] font-semibold text-slate-500">{sinJornada} sin jornada asignada</div>
         </div>
       </div>
 
@@ -183,17 +223,22 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
           <input type="checkbox" checked={soloConExcepciones} onChange={(e) => setSoloConExcepciones(e.target.checked)} className="accent-violet-600" />
           Solo ambientes con excepciones
         </label>
+        <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 cursor-pointer">
+          <input type="checkbox" checked={soloConAlertas} onChange={(e) => setSoloConAlertas(e.target.checked)} className="accent-rose-600" />
+          Solo con duplicados / sin jornada
+        </label>
       </div>
 
       {/* Tabla */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs min-w-[820px]">
+          <table className="w-full text-left text-xs min-w-[920px]">
             <thead>
               <tr className="border-b border-slate-200 text-slate-400 font-bold uppercase text-[10px] tracking-wider bg-slate-50/80">
                 <th className="py-2.5 px-3 w-56">Ambiente</th>
                 <th className="py-2.5 px-3">Ficha</th>
                 <th className="py-2.5 px-3">Uso</th>
+                <th className="py-2.5 px-3">Jornada</th>
                 <th className="py-2.5 px-3">Días y franjas</th>
                 <th className="py-2.5 px-3 text-center">Horas/sem</th>
               </tr>
@@ -201,7 +246,7 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
             <tbody>
               {itemsFiltrados.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-400">
+                  <td colSpan={6} className="py-8 text-center text-slate-400">
                     {ambientes.length === 0 && items.length === 0
                       ? 'No hay ambientes registrados. Regístralos en Parametrizaciones → Ambientes.'
                       : 'No hay ambientes para este filtro.'}
@@ -214,7 +259,7 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
                       <div className="font-bold text-[#111C2D]">{a.ambiente}</div>
                       <div className="text-[10px] text-slate-400">{[a.tipo, a.sede, a.capacidad ? `${a.capacidad} aprendices` : ''].filter(Boolean).join(' · ')}</div>
                     </td>
-                    <td colSpan={4} className="py-2.5 px-3 text-slate-400 italic">Libre — sin fichas asignadas</td>
+                    <td colSpan={5} className="py-2.5 px-3 text-slate-400 italic">Libre — sin fichas asignadas</td>
                   </tr>
                 ) : a.fichas.map((f, i) => (
                   <tr key={`${a.ambiente}_${f.fichaId}`} className={i === 0 ? 'border-t border-slate-200' : ''}>
@@ -223,6 +268,12 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
                         <div className="font-bold text-[#111C2D]">{a.ambiente}</div>
                         <div className="text-[10px] text-slate-400">{[a.tipo, a.sede, a.capacidad ? `${a.capacidad} aprendices` : ''].filter(Boolean).join(' · ')}</div>
                         <div className="text-[10px] font-bold text-[#0D631B] mt-1">{a.fichas.length} ficha(s) · {a.horasTotales}h/sem</div>
+                        {a.jornadasLibres.length > 0 && a.jornadasLibres.length < 3 && (
+                          <div className="text-[10px] font-semibold text-slate-500 mt-0.5">Libre en: {a.jornadasLibres.join(', ')}</div>
+                        )}
+                        {a.conflictos > 0 && (
+                          <div className="text-[10px] font-bold text-rose-600 mt-0.5">⚠ {a.conflictos} fichas en la misma jornada</div>
+                        )}
                       </td>
                     )}
                     <td className="py-2.5 px-3 align-top">
@@ -234,6 +285,18 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-[#0D631B] border border-emerald-200">Base</span>
                       ) : (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-50 text-violet-800 border border-violet-200">Excepción</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3 align-top">
+                      {f.jornada ? (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                          f.duplicada ? 'bg-rose-50 text-rose-700 border-rose-300' : 'bg-sky-50 text-sky-800 border-sky-200'
+                        }`}>{f.jornada}{f.duplicada ? ' · duplicada' : ''}</span>
+                      ) : f.uso === 'BASE' ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">Sin jornada</span>
+                      ) : <span className="text-slate-300">—</span>}
+                      {f.vencida && f.uso === 'BASE' && (
+                        <div className="text-[10px] font-bold text-slate-400 mt-1" title={`Etapa lectiva hasta ${f.fechaFin || ''}`}>Finalizada · libera el ambiente</div>
                       )}
                     </td>
                     <td className="py-2.5 px-3 align-top text-slate-600">{f.horario || '—'}</td>

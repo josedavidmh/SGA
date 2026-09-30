@@ -1,4 +1,5 @@
 import { ambienteEfectivo } from '../lib/ambientes';
+import { claveNombrePersona } from '../lib/nombresInstructor';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -125,8 +126,10 @@ function agruparPorInstructor(bloques: BloqueHorario[]): GrupoInstructor[] {
   const mapa = new Map<string, GrupoInstructor>();
   // Los bloques VACANTES (sin instructor todavía) no tienen a quién agrupar
   // aquí — se reportan aparte, en la lista de espacios por cubrir.
+  // Por persona (nombre sin tildes ni títulos), no por id: la misma persona
+  // con dos registros o escrita distinto sale una sola vez.
   bloques.filter(b => b.instructorId).forEach(b => {
-    const key = b.instructorId!;
+    const key = claveNombrePersona(b.instructorNombre || '') || b.instructorId!;
     if (!mapa.has(key)) {
       mapa.set(key, { instructorId: b.instructorId!, instructorNombre: b.instructorNombre!, bloques: [] });
     }

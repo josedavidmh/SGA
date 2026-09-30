@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { generarUuid } from '../lib/id';
+import { normalizarNombreTrimestre } from '../lib/calendarioTrimestres';
 import { Ficha, Instructor, ProgramaFormacion, BloqueHorario, ActividadSeguimiento, AmbienteAprendizaje, EstadoActividad, RapSeguimiento, EstadoRap, Competencia, ResultadoAprendizaje, User, AuditoriaSistema, EspecialidadTematica, TrimestreCalendario, RegistroArchivoSeguimiento, AuditoriaIngesta, RegistroHorasEjecutadas } from '../types';
 
 export interface SyncResult<T> {
@@ -42,13 +43,15 @@ export async function fetchFichasFromSupabase(): Promise<Ficha[]> {
       instructorLiderEmail: 'instructor@correo.edu.co',
       modalidad: (row.modalidad as any) || 'Presencial Diurna',
       ambientePrincipal: row.ambiente_principal || 'Ambiente Principal',
+      // undefined si la columna no existe (20260929j sin correr): se conserva lo local.
+      jornadaAmbiente: ['Mañana', 'Tarde', 'Noche'].includes(row.jornada_ambiente) ? row.jornada_ambiente : undefined,
       // undefined si la columna no existe (20260929h sin correr): se conserva lo local.
       ambientesExcepcion: row.ambientes_excepcion && typeof row.ambientes_excepcion === 'object' ? row.ambientes_excepcion : undefined,
-      periodoLectivo: row.periodo_lectivo || '2026-III',
+      periodoLectivo: normalizarNombreTrimestre(row.periodo_lectivo) || '2026-III',
       fechaInicio: row.fecha_inicio ? String(row.fecha_inicio).split('T')[0] : '2026-07-01',
       fechaFin: row.fecha_fin ? String(row.fecha_fin).split('T')[0] : '2027-12-15',
       matriculaInicial: Number(row.matricula_inicial || 30),
-      aprendicesActivos: Number(row.aprendices_activos || row.matricula_inicial || 30),
+      aprendicesActivos: Number(row.aprendices_activos ?? row.matricula_inicial ?? 30),
       aprendicesCulminados: Number(row.aprendices_culminados || 0),
       aprendicesCancelados: Number(row.aprendices_cancelados || 0),
       aprendicesAplazados: Number(row.aprendices_aplazados || 0),
@@ -61,6 +64,7 @@ export async function fetchFichasFromSupabase(): Promise<Ficha[]> {
       tasaDesercion: row.tasa_desercion != null ? Number(row.tasa_desercion) : undefined,
       aprendicesCondicionados: row.aprendices_condicionados != null ? Number(row.aprendices_condicionados) : undefined,
       aprendicesTrasladados: row.aprendices_trasladados != null ? Number(row.aprendices_trasladados) : undefined,
+      totalAprendicesActual: row.total_aprendices_actual != null ? Number(row.total_aprendices_actual) : undefined,
       estado: (row.estado as any) || 'ACTIVA',
       progresoCurricular: row.progreso_curricular != null ? Number(row.progreso_curricular) : (undefined as unknown as number),
       rapsTotales: 38,
@@ -84,7 +88,7 @@ export async function insertFichaInSupabase(ficha: Ficha): Promise<SyncResult<an
   }
 
   try {
-    const payload = {
+    const payload: any = {
       // Se envía el id generado en el cliente (UUID real, ver src/lib/id.ts) para que
       // la fila en Supabase quede con el MISMO id que el estado local desde el primer
       // momento. Antes no se enviaba y Postgres generaba otro id distinto al local,
@@ -98,6 +102,7 @@ export async function insertFichaInSupabase(ficha: Ficha): Promise<SyncResult<an
       instructor_lider_id: ficha.instructorLiderId || null,
       modalidad: ficha.modalidad,
       ambiente_principal: ficha.ambientePrincipal,
+      jornada_ambiente: ficha.jornadaAmbiente || null,
       periodo_lectivo: ficha.periodoLectivo,
       fecha_inicio: ficha.fechaInicio,
       fecha_fin: ficha.fechaFin,
@@ -113,10 +118,16 @@ export async function insertFichaInSupabase(ficha: Ficha): Promise<SyncResult<an
       horas_ejecutadas: ficha.horasEjecutadas
     };
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('fichas')
       .insert([payload])
       .select();
+
+    // Si la columna de jornada (20260929j) aún no existe, se guarda la ficha sin ella.
+    if (error && error.code === 'PGRST204') {
+      delete payload.jornada_ambiente;
+      ({ data, error } = await supabase.from('fichas').insert([payload]).select());
+    }
 
     if (error) {
       const isRls = error.code === '42501' || error.message?.toLowerCase().includes('row-level security');
@@ -167,13 +178,15 @@ export async function updateFichaInSupabase(id: string, ficha: Partial<Ficha>): 
     if (ficha.horasIndependientesTotales !== undefined) payload.horas_independientes_totales = ficha.horasIndependientesTotales;
     if (ficha.horasEjecutadas !== undefined) payload.horas_ejecutadas = ficha.horasEjecutadas;
     // Columnas de 20260929f (resultado de Juicios Evaluativos)
-    const COLUMNAS_JUICIOS = ['tasa_retencion', 'tasa_desercion', 'aprendices_condicionados', 'aprendices_trasladados', 'progreso_curricular', 'ambientes_excepcion'];
+    const COLUMNAS_JUICIOS = ['tasa_retencion', 'tasa_desercion', 'aprendices_condicionados', 'aprendices_trasladados', 'progreso_curricular', 'ambientes_excepcion', 'jornada_ambiente', 'total_aprendices_actual'];
+    if (ficha.jornadaAmbiente !== undefined) payload.jornada_ambiente = ficha.jornadaAmbiente || null;
     // Columna de 20260929h (excepciones de ambiente por día)
     if (ficha.ambientesExcepcion !== undefined) payload.ambientes_excepcion = ficha.ambientesExcepcion || {};
     if (ficha.tasaRetencion !== undefined) payload.tasa_retencion = ficha.tasaRetencion;
     if (ficha.tasaDesercion !== undefined) payload.tasa_desercion = ficha.tasaDesercion;
     if (ficha.aprendicesCondicionados !== undefined) payload.aprendices_condicionados = ficha.aprendicesCondicionados;
     if (ficha.aprendicesTrasladados !== undefined) payload.aprendices_trasladados = ficha.aprendicesTrasladados;
+    if (ficha.totalAprendicesActual !== undefined) payload.total_aprendices_actual = ficha.totalAprendicesActual;
     if (ficha.progresoCurricular !== undefined) payload.progreso_curricular = ficha.progresoCurricular;
 
     let { data, error } = await supabase
@@ -1190,7 +1203,7 @@ export async function fetchHorariosFromSupabase(): Promise<BloqueHorario[]> {
       duracionHoras: Number(row.duracion_horas || 0),
       fechaCorteInicio: row.fecha_corte_inicio,
       fechaCorteFin: row.fecha_corte_fin,
-      trimestre: row.trimestre
+      trimestre: normalizarNombreTrimestre(row.trimestre)
     }));
   } catch (err: any) {
     console.error('Excepción al consultar bloques_horarios en Supabase:', err);

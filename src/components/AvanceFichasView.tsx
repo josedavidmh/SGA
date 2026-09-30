@@ -30,8 +30,10 @@ import {
 import { Ficha, User, RegionalCentro, BloqueHorario, ActividadSeguimiento, ReporteJuiciosFicha, RapSeguimiento, ResultadoAprendizaje, TrimestreCalendario } from '../types';
 import { procesarJuiciosEvaluativosExcel, obtenerReporteDemoJuicios } from '../services/juiciosEvaluativosService';
 import { generarFormatoAsociacionFichas, generarFormatoEventos } from '../services/reportesOficialesService';
+import { aplicarCalendarioABloques, normalizarNombreTrimestre, buscarTrimestreCalendario } from '../lib/calendarioTrimestres';
 import { obtenerTrimestresDisponibles } from '../services/ambientesReporteService';
 import { ModalJuiciosEvaluativos } from './ModalJuiciosEvaluativos';
+import { totalMatriculados } from '../lib/aprendices';
 
 interface AvanceFichasViewProps {
   currentUser: User;
@@ -199,7 +201,7 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
       }
       const g = mapa.get(key)!;
       g.fichas.push(f);
-      g.totalMatricula += f.matriculaInicial || 0;
+      g.totalMatricula += totalMatriculados(f);
       g.totalActivos += f.aprendicesActivos || 0;
       g.totalCancelados += f.aprendicesCancelados || 0;
       g.totalRetiros += f.aprendicesRetiroVoluntario || 0;
@@ -239,7 +241,7 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
       const key = obtenerClave(f) || 'Sin dato';
       if (!mapa.has(key)) mapa.set(key, { matricula: 0, activos: 0, cancelados: 0, retiros: 0 });
       const g = mapa.get(key)!;
-      g.matricula += f.matriculaInicial || 0;
+      g.matricula += totalMatriculados(f);
       g.activos += f.aprendicesActivos || 0;
       g.cancelados += f.aprendicesCancelados || 0;
       g.retiros += f.aprendicesRetiroVoluntario || 0;
@@ -260,12 +262,12 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
   };
 
   const tendenciaPorTrimestre = useMemo(
-    () => agregarPorClave(f => f.periodoLectivo),
+    () => agregarPorClave(f => normalizarNombreTrimestre(f.periodoLectivo)),
     [fichasFiltradas]
   );
 
   const tendenciaPorAnio = useMemo(
-    () => agregarPorClave(f => (f.periodoLectivo || '').split('-')[0]),
+    () => agregarPorClave(f => normalizarNombreTrimestre(f.periodoLectivo).split('-')[0]),
     [fichasFiltradas]
   );
 
@@ -328,12 +330,23 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
       return;
     }
     const catalogoRapsPrograma = raps.filter(r => r.programaCodigo === fichaToExport.programaCodigo);
-    generarFormatoEventos(fichaToExport, centro, bloquesTrimestre, catalogoRapsPrograma, etiquetaTrimestre(trimestre)).then(resultado => {
+    generarFormatoEventos(fichaToExport, centro, aplicarCalendarioABloques(bloquesTrimestre, trimestresCalendario), catalogoRapsPrograma, etiquetaTrimestre(trimestre)).then(resultado => {
       if (resultado.festivosTotalesExcluidos > 0) {
         alert(`Reporte generado. Se excluyeron ${resultado.festivosTotalesExcluidos} ocurrencia(s) por caer en día festivo colombiano — no se contaron como horas ejecutadas.`);
       }
     });
   };
+
+  // Aprendices reales de la ficha según el último cargue de Juicios Evaluativos:
+  // activos (en formación + condicionados) e inactivos (cancelados, retiro
+  // voluntario, aplazados, trasladados...). Sin cargue, se usa la matrícula inicial.
+  const totalRealFicha = (f: Ficha) => totalMatriculados(f);
+  const inactivosFicha = (f: Ficha) =>
+    f.totalAprendicesActual != null
+      ? Math.max(0, f.totalAprendicesActual - (f.aprendicesActivos || 0))
+      : (f.aprendicesCancelados || 0) + (f.aprendicesRetiroVoluntario || 0) + (f.aprendicesAplazados || 0) + (f.aprendicesTrasladados || 0);
+  const detalleInactivos = (f: Ficha) =>
+    `Cancelados: ${f.aprendicesCancelados || 0} · Retiro voluntario: ${f.aprendicesRetiroVoluntario || 0} · Aplazados: ${f.aprendicesAplazados || 0} · Trasladados: ${f.aprendicesTrasladados || 0}`;
 
   const handleVerFicha = (f: Ficha) => {
     onSelectFicha(f);
@@ -367,6 +380,11 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
             width={38}
           />
           <Tooltip
+            labelFormatter={(label: any) => {
+              // Si es un trimestre parametrizado, se muestra su rango oficial de fechas.
+              const cal = buscarTrimestreCalendario(trimestresCalendario, String(label));
+              return cal ? `${label} (${cal.fechaInicio} a ${cal.fechaFin})` : label;
+            }}
             formatter={(value: any, name: any) => [`${value}%`, name]}
             contentStyle={{ borderRadius: 12, border: '1px solid #E2E8F0', fontSize: 12, fontWeight: 600 }}
             cursor={{ fill: '#F8FAFC' }}
@@ -552,6 +570,7 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
                 <th className="pb-3 px-3">NIVEL / MODALIDAD</th>
                 <th className="pb-3 px-3 text-center">MATRÍCULA</th>
                 <th className="pb-3 px-3 text-center">ACTIVOS</th>
+                <th className="pb-3 px-3 text-center">INACTIVOS</th>
                 <th className="pb-3 px-3 text-center">DESERCIONES</th>
                 <th className="pb-3 px-3">TASA RETENCIÓN</th>
                 <th className="pb-3 px-3">TASA DESERCIÓN</th>
@@ -565,7 +584,7 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
                     {/* Fila de Total del Programa: suma de todas sus fichas/cohortes —
                         se actualiza progresivamente a medida que se registran o cierran fichas. */}
                     <tr className="bg-slate-50/80 border-y border-slate-200">
-                      <td colSpan={8} className="py-2.5 px-3">
+                      <td colSpan={9} className="py-2.5 px-3">
                         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1.5">
                           <div className="flex items-center space-x-2">
                             <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Total Programa</span>
@@ -648,13 +667,23 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
 
                       {/* Matrícula Inicial */}
                       <td className="py-3.5 px-3 text-center font-bold text-slate-800">
-                        {f.matriculaInicial}
+                        {totalMatriculados(f)}
                       </td>
 
                       {/* Activos */}
                       <td className="py-3.5 px-3 text-center">
                         <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                           {f.aprendicesActivos}
+                        </span>
+                      </td>
+
+                      {/* Inactivos (cancelados, retiros, aplazados, trasladados) */}
+                      <td className="py-3.5 px-3 text-center">
+                        <span
+                          className="font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200"
+                          title={detalleInactivos(f)}
+                        >
+                          {inactivosFicha(f)}
                         </span>
                       </td>
 
@@ -737,7 +766,7 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
                 ))
               ) : (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center">
+                  <td colSpan={9} className="py-12 text-center">
                     <div className="max-w-md mx-auto space-y-3">
                       <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-[#0D631B] flex items-center justify-center mx-auto">
                         <GraduationCap className="w-6 h-6" />
@@ -841,7 +870,7 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
                 <div className="text-[10px] font-bold text-emerald-800 uppercase">Retención</div>
                 <div className="text-lg font-black text-[#0D631B]">{fichaModalDetalle.tasaRetencion}%</div>
                 <div className="text-[10px] text-emerald-700 font-medium">
-                  {fichaModalDetalle.aprendicesActivos} activos / {fichaModalDetalle.matriculaInicial} total
+                  {fichaModalDetalle.aprendicesActivos} activos · {inactivosFicha(fichaModalDetalle)} inactivos / {totalRealFicha(fichaModalDetalle)} total
                 </div>
               </div>
               <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200/60">

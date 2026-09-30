@@ -162,12 +162,14 @@ import {
   AUDITORIA_SISTEMA_INICIAL
 } from './mockData';
 import { generarUuid } from './lib/id';
+import { normalizarNombreTrimestre } from './lib/calendarioTrimestres';
 import { esFichaDelLider, fichasPermitidas, puedeEditarHorarioDeFicha } from './lib/permisos';
 import { homologarInstructores } from './lib/nombresInstructor';
 import { ambienteDelDia, ambienteEfectivo, buscarChoqueAmbiente, claveExcepcionDia, normalizarAmbiente } from './lib/ambientes';
 
 const mismoAmbienteONombre = (a?: string, b?: string) => normalizarAmbiente(a) === normalizarAmbiente(b);
 import { esProvisionalVigente, restaurarAntesDeProvisional, fotoPrevia } from './lib/firmezaSeguimiento';
+import { totalMatriculados } from './lib/aprendices';
 
 export default function App() {
   // Estado de Usuarios Registrados en el Sistema (con persistencia local)
@@ -304,6 +306,27 @@ export default function App() {
   React.useEffect(() => {
     localStorage.setItem('sena_programas_formacion', JSON.stringify(programas));
   }, [programas]);
+
+  // Una ficha con el mismo código de programa que el catálogo debe mostrar el
+  // MISMO nombre (p.ej. una ficha traída de Supabase con "Tecnología en Análisis
+  // y Desarrollo de Software" junto a otras con "ADSO: Análisis y Desarrollo de
+  // Software"). Se iguala al del catálogo, en pantalla y en Supabase.
+  React.useEffect(() => {
+    if (programas.length === 0) return;
+    const nombrePorCodigo = new Map(programas.map(p => [p.codigo, p.nombre]));
+    const aCorregir = fichas.filter(f => {
+      const oficial = nombrePorCodigo.get(f.programaCodigo);
+      return oficial && f.programaNombre !== oficial;
+    });
+    if (aCorregir.length === 0) return;
+    setFichas(prev => prev.map(f => {
+      const oficial = nombrePorCodigo.get(f.programaCodigo);
+      return oficial && f.programaNombre !== oficial ? { ...f, programaNombre: oficial } : f;
+    }));
+    aCorregir.forEach(f => {
+      updateFichaInSupabase(f.id, { programaNombre: nombrePorCodigo.get(f.programaCodigo)! }).catch(() => { /* se reintenta en la próxima carga */ });
+    });
+  }, [programas, fichas]);
 
   // Garantizar que la base de fichas, instructores, competencias, planeaciones y juicios inicie 100% limpia para registrar datos reales
   React.useEffect(() => {
@@ -908,7 +931,9 @@ export default function App() {
                 aprendicesCondicionados: fichaResuelta.aprendicesCondicionados ?? local.aprendicesCondicionados,
                 aprendicesTrasladados: fichaResuelta.aprendicesTrasladados ?? local.aprendicesTrasladados,
                 progresoCurricular: fichaResuelta.progresoCurricular ?? local.progresoCurricular ?? 0,
-                ambientesExcepcion: fichaResuelta.ambientesExcepcion ?? local.ambientesExcepcion
+                ambientesExcepcion: fichaResuelta.ambientesExcepcion ?? local.ambientesExcepcion,
+                jornadaAmbiente: fichaResuelta.jornadaAmbiente ?? local.jornadaAmbiente,
+                totalAprendicesActual: fichaResuelta.totalAprendicesActual ?? local.totalAprendicesActual
               };
             } else {
               merged.push({
@@ -1065,27 +1090,55 @@ export default function App() {
         const idsEnDb = new Set((dbHorarios || []).map(b => b.id));
         const idsCorregidos = new Map<string, string>();
         const locales = horariosRef.current.map(b => {
-          if (esUuidValido(b.id)) return b;
+          const trimestreOk = normalizarNombreTrimestre(b.trimestre);
+          const base = trimestreOk !== b.trimestre ? { ...b, trimestre: trimestreOk } : b;
+          if (esUuidValido(base.id)) return base;
           const nuevoId = generarUuid();
           idsCorregidos.set(b.id, nuevoId);
-          return { ...b, id: nuevoId };
+          return { ...base, id: nuevoId };
         });
         if (idsCorregidos.size > 0) {
           setHorarios(prev => prev.map(b => idsCorregidos.has(b.id) ? { ...b, id: idsCorregidos.get(b.id)! } : b));
         }
-        const pendientes = locales.filter(b => !idsEnDb.has(b.id));
+        const casilla = (b: BloqueHorario) => `${b.fichaId}|${b.diaSemana}|${b.franja}|${normalizarNombreTrimestre(b.trimestre)}`;
+        const casillasEnDb = new Set((dbHorarios || []).map(casilla));
+        const sinSubir = locales.filter(b => !idsEnDb.has(b.id));
+        // Un bloque local cuya casilla (ficha + día + franja + trimestre) ya está
+        // ocupada en Supabase es un duplicado: no se puede subir nunca y antes
+        // hacía saltar el aviso en cada recarga. Se descarta: manda lo de Supabase.
+        const duplicados = sinSubir.filter(b => casillasEnDb.has(casilla(b)));
+        const pendientes = sinSubir.filter(b => !casillasEnDb.has(casilla(b)));
+        if (duplicados.length > 0) {
+          console.warn(`Se descartaron ${duplicados.length} bloque(s) locales duplicados de casillas que ya existen en Supabase.`);
+          const idsDup = new Set(duplicados.map(b => b.id));
+          setHorarios(prev => prev.filter(b => !idsDup.has(b.id) && !idsDup.has(idsCorregidos.get(b.id) || '')));
+        }
         let fallidos = 0;
         let primerError = '';
+        const idsFallidos: string[] = [];
         for (const b of pendientes) {
           const res = await insertHorarioInSupabase(b);
           if (!res.success) {
             fallidos++;
+            idsFallidos.push(b.id);
             if (!primerError) primerError = res.error || '';
             console.error(`No se pudo subir a Supabase el bloque ${b.diaSemana} ${b.franja} (${b.rapCodigo}):`, res.error);
           }
         }
         if (fallidos > 0) {
-          alert(`${pendientes.length - fallidos} de ${pendientes.length} bloques de horario que estaban solo en este navegador se subieron a Supabase. ${fallidos} no se pudieron subir:\n\n${primerError}`);
+          // El aviso sale una sola vez por cada conjunto de bloques fallidos;
+          // en las siguientes cargas queda solo en la consola.
+          const firma = idsFallidos.sort().join(',');
+          let yaAvisado = false;
+          try {
+            yaAvisado = localStorage.getItem('sena_aviso_bloques_no_subidos') === firma;
+            if (!yaAvisado) localStorage.setItem('sena_aviso_bloques_no_subidos', firma);
+          } catch { /* sin almacenamiento: se avisa como antes */ }
+          if (!yaAvisado) {
+            alert(`${pendientes.length - fallidos} de ${pendientes.length} bloques de horario que estaban solo en este navegador se subieron a Supabase. ${fallidos} no se pudieron subir:\n\n${primerError}\n\n(Este aviso no se repetirá.)`);
+          }
+        } else {
+          try { localStorage.removeItem('sena_aviso_bloques_no_subidos'); } catch { /* noop */ }
         }
       }
       if (dbHorarios && dbHorarios.length > 0) {
@@ -2549,17 +2602,16 @@ export default function App() {
       if (f.id !== ficha.id) return f;
       return {
         ...f,
-        // matriculaInicial NUNCA se toca desde aquí: es la línea base fija
-        // de matrícula con la que se calculan las fórmulas institucionales
-        // de cierre (ver CierresView, PRD 3.4). El total de aprendices que
-        // trae ESTE cargue de Juicios es el estado actual, no la matrícula
-        // inicial de la ficha.
+        // matriculaInicial no se toca (queda como dato de registro), pero el
+        // total de este cargue se guarda en totalAprendicesActual: es la base
+        // de los reportes y fórmulas de retención/deserción (ver lib/aprendices).
         aprendicesActivos: activosCount,
         aprendicesRetiroVoluntario: retiroVolCount,
         aprendicesCancelados: canceladosCount,
         aprendicesAplazados: aplazadosCount,
         aprendicesCondicionados: condicionadosCount,
         aprendicesTrasladados: trasladadosCount,
+        totalAprendicesActual: totalAprendices,
         tasaRetencion: retencion,
         tasaDesercion: desercion,
         progresoCurricular: reporte.porcentajeAprobacionFicha
@@ -2575,6 +2627,7 @@ export default function App() {
       aprendicesAplazados: aplazadosCount,
       aprendicesCondicionados: condicionadosCount,
       aprendicesTrasladados: trasladadosCount,
+      totalAprendicesActual: totalAprendices,
       tasaRetencion: retencion,
       tasaDesercion: desercion,
       progresoCurricular: reporte.porcentajeAprobacionFicha
@@ -3150,7 +3203,7 @@ export default function App() {
     aplazados: number, 
     retiros: number
   ) => {
-    const matricula = selectedFicha?.matriculaInicial || 35;
+    const matricula = (selectedFicha ? totalMatriculados(selectedFicha) : 0) || 35;
     const retencion = Number(((culminados / matricula) * 100).toFixed(1));
     const desercion = Number((((cancelados + retiros) / matricula) * 100).toFixed(1));
 
@@ -3367,6 +3420,7 @@ export default function App() {
               actividades={actividades}
               puedeEditar={puedeEditarHorarioDeFicha(selectedFicha, currentUser, instructores)}
               ambientesCatalogo={ambientes}
+              trimestresCalendario={trimestresCalendario}
               todasLasFichas={fichas}
               onCambiarAmbienteDia={handleCambiarAmbienteDia}
               onCambiarAmbienteBloque={handleCambiarAmbienteBloque}
@@ -3380,6 +3434,7 @@ export default function App() {
               horarios={horarios}
               allFichas={fichasVisibles}
               ambientes={ambientes}
+              centro={centro}
             />
           )}
 
@@ -3547,6 +3602,8 @@ export default function App() {
         onRegistrarInstructor={handleGuardarInstructor}
         programas={programas}
         ambientes={ambientes}
+        todasLasFichas={fichas}
+        trimestresCalendario={trimestresCalendario}
         fichaEditar={fichaParaEditar}
       />
 

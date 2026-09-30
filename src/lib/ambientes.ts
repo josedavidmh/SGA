@@ -1,4 +1,4 @@
-import { BloqueHorario, DiaSemana, Ficha, FranjaHorario } from '../types';
+import { BloqueHorario, DiaSemana, Ficha, FranjaHorario, JornadaAmbiente } from '../types';
 
 /**
  * AMBIENTES DE UNA FICHA EN EL HORARIO
@@ -80,4 +80,72 @@ export function buscarChoqueAmbiente(
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// JORNADA DEL AMBIENTE BASE
+// Un ambiente puede tener una ficha por jornada (Mañana / Tarde / Noche).
+// ---------------------------------------------------------------------------
+
+export const JORNADAS: JornadaAmbiente[] = ['Mañana', 'Tarde', 'Noche'];
+
+export const DETALLE_JORNADA: Record<JornadaAmbiente, string> = {
+  'Mañana': 'Mañana (06:00 - 12:00)',
+  'Tarde': 'Tarde (13:00 - 19:00)',
+  'Noche': 'Noche (después de las 19:00)'
+};
+
+export const ORDEN_JORNADA: Record<string, number> = { 'Mañana': 0, 'Tarde': 1, 'Noche': 2 };
+
+/** Jornada a la que pertenece una franja del horario. */
+export function jornadaDeFranja(franja: FranjaHorario | string): JornadaAmbiente {
+  const hora = parseInt(String(franja).slice(0, 2), 10);
+  if (Number.isNaN(hora) || hora < 12) return 'Mañana';
+  return hora < 19 ? 'Tarde' : 'Noche';
+}
+
+/** Fecha de hoy en formato YYYY-MM-DD (hora local). */
+export const hoyISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+/** La etapa lectiva de la ficha ya terminó (si no tiene fecha fin, se asume vigente). */
+export const fichaVencida = (f: Pick<Ficha, 'fechaFin'>, hoy: string = hoyISO()) =>
+  !!f.fechaFin && f.fechaFin < hoy;
+
+/** ¿Esta ficha ocupa su ambiente hoy? Ni las cerradas ni las de etapa lectiva vencida lo ocupan. */
+export const ocupaAmbiente = (f: Ficha, hoy: string = hoyISO()) =>
+  f.estado !== 'CERRADA' && !fichaVencida(f, hoy);
+
+/** ¿Dos etapas lectivas se cruzan en el tiempo? Una fecha vacía se toma como abierta. */
+export const rangosSeSolapan = (
+  a: { fechaInicio?: string; fechaFin?: string },
+  b: { fechaInicio?: string; fechaFin?: string }
+) => {
+  const ini = (r: { fechaInicio?: string }) => r.fechaInicio || '0000-01-01';
+  const fin = (r: { fechaFin?: string }) => r.fechaFin || '9999-12-31';
+  return ini(a) <= fin(b) && ini(b) <= fin(a);
+};
+
+/**
+ * Otra ficha que ya tiene ese mismo ambiente en esa misma jornada durante
+ * fechas que se cruzan con las de la ficha que se guarda. Devuelve null si está libre.
+ * No cuentan: la propia ficha, las cerradas, las de etapa lectiva ya vencida
+ * (el ambiente vuelve a quedar disponible) ni las que no se cruzan en fechas.
+ */
+export function buscarConflictoAmbienteJornada(
+  fichas: Ficha[],
+  destino: { fichaId?: string; ambiente: string; jornada?: JornadaAmbiente | ''; fechaInicio?: string; fechaFin?: string }
+): Ficha | null {
+  if (!destino.jornada || esAmbienteGenerico(destino.ambiente)) return null;
+  return (
+    fichas.find(f =>
+      f.id !== destino.fichaId &&
+      ocupaAmbiente(f) &&
+      f.jornadaAmbiente === destino.jornada &&
+      mismoAmbiente(f.ambientePrincipal, destino.ambiente) &&
+      rangosSeSolapan(f, destino)
+    ) || null
+  );
 }

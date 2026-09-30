@@ -17,8 +17,10 @@ import {
   Loader2,
   Pencil
 } from 'lucide-react';
-import { Ficha, Instructor, ProgramaFormacion, AmbienteAprendizaje } from '../types';
+import { Ficha, Instructor, ProgramaFormacion, AmbienteAprendizaje, JornadaAmbiente, TrimestreCalendario } from '../types';
+import { JORNADAS, DETALLE_JORNADA, buscarConflictoAmbienteJornada, esAmbienteGenerico } from '../lib/ambientes';
 import { generarUuid } from '../lib/id';
+import { trimestreDeFecha } from '../lib/calendarioTrimestres';
 import { InstructorSearchSelect } from './InstructorSearchSelect';
 import { insertFichaInSupabase } from '../services/supabaseService';
 import { isSupabaseConfigured } from '../lib/supabaseClient';
@@ -32,6 +34,10 @@ interface ModalCrearFichaProps {
   onRegistrarInstructor?: (instructor: Instructor, crearUsuario?: boolean) => void;
   programas?: ProgramaFormacion[];
   ambientes?: AmbienteAprendizaje[];
+  /** Todas las fichas, para validar que el ambiente + jornada no esté ocupado. */
+  todasLasFichas?: Ficha[];
+  /** Calendario de Parametrizaciones: define a qué trimestre pertenece la fecha de inicio. */
+  trimestresCalendario?: TrimestreCalendario[];
   fichaEditar?: Ficha | null;
 }
 
@@ -44,6 +50,8 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
   onRegistrarInstructor,
   programas = [],
   ambientes = [],
+  todasLasFichas = [],
+  trimestresCalendario = [],
   fichaEditar = null
 }) => {
   const modoEdicion = !!fichaEditar;
@@ -54,7 +62,7 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
   const [nivelFormacion, setNivelFormacion] = React.useState<'Técnico' | 'Tecnólogo' | 'Auxiliar'>('Tecnólogo');
   const [modalidad, setModalidad] = React.useState<'Presencial Diurna' | 'Presencial Nocturna' | 'Mixta / Virtual'>('Presencial Diurna');
   const [ambientePrincipal, setAmbientePrincipal] = React.useState('');
-  const [periodoLectivo, setPeriodoLectivo] = React.useState('2026-III');
+  const [jornadaAmbiente, setJornadaAmbiente] = React.useState<JornadaAmbiente | ''>('');
   const [fechaInicio, setFechaInicio] = React.useState('2026-07-01');
   const [fechaFin, setFechaFin] = React.useState('2027-12-15');
   const [matriculaInicial, setMatriculaInicial] = React.useState(32);
@@ -88,7 +96,7 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
       setNivelFormacion(fichaEditar.nivelFormacion || 'Tecnólogo');
       setModalidad(fichaEditar.modalidad || 'Presencial Diurna');
       setAmbientePrincipal(fichaEditar.ambientePrincipal || '');
-      setPeriodoLectivo(fichaEditar.periodoLectivo || '2026-III');
+      setJornadaAmbiente(fichaEditar.jornadaAmbiente || '');
       setFechaInicio(fichaEditar.fechaInicio || '2026-07-01');
       setFechaFin(fichaEditar.fechaFin || '2027-12-15');
       setMatriculaInicial(fichaEditar.matriculaInicial || 32);
@@ -105,7 +113,7 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
       setNivelFormacion('Tecnólogo');
       setModalidad('Presencial Diurna');
       setAmbientePrincipal('');
-      setPeriodoLectivo('2026-III');
+      setJornadaAmbiente('');
       setFechaInicio('2026-07-01');
       setFechaFin('2027-12-15');
       setMatriculaInicial(32);
@@ -128,6 +136,15 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
     sqlTip?: string;
   } | null>(null);
 
+  // Ficha (activa) que ya usa este ambiente en esta jornada.
+  const conflictoJornada = buscarConflictoAmbienteJornada(todasLasFichas, {
+    fichaId: fichaEditar?.id,
+    ambiente: ambientePrincipal,
+    jornada: jornadaAmbiente,
+    fechaInicio,
+    fechaFin
+  });
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -138,6 +155,21 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
     }
     if (fechaInicio && fechaFin && fechaFin < fechaInicio) {
       alert('La fecha de finalización no puede ser anterior a la fecha de inicio de la etapa lectiva.');
+      return;
+    }
+
+    const ambienteReal = !!ambientePrincipal && !esAmbienteGenerico(ambientePrincipal);
+    if (ambienteReal && !jornadaAmbiente) {
+      alert('Indica la jornada (Mañana, Tarde o Noche) en la que esta ficha usará el ambiente.');
+      return;
+    }
+    if (conflictoJornada) {
+      alert(
+        `El ambiente "${ambientePrincipal}" ya está ocupado en la jornada ${jornadaAmbiente} por la ficha ${conflictoJornada.numero_ficha}` +
+        `${conflictoJornada.programaNombre ? ` (${conflictoJornada.programaNombre})` : ''}, ` +
+        `cuya etapa lectiva va del ${conflictoJornada.fechaInicio || '—'} al ${conflictoJornada.fechaFin || '—'}.\n\n` +
+        'Elige otra jornada u otro ambiente, o ajusta las fechas para que no se crucen.'
+      );
       return;
     }
 
@@ -203,7 +235,9 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
       instructorLiderEmail: finalInstEmail,
       modalidad,
       ambientePrincipal,
-      periodoLectivo,
+      jornadaAmbiente: ambientePrincipal ? (jornadaAmbiente || undefined) : undefined,
+      // Ya no se captura: es el trimestre en el que cae la fecha de inicio.
+      periodoLectivo: trimestreDeFecha(trimestresCalendario, fechaInicio) || fichaBase.periodoLectivo,
       fechaInicio,
       fechaFin,
       matriculaInicial: Number(matriculaInicial),
@@ -362,7 +396,7 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
             </select>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Nivel de Formación */}
             <div>
               <label className="font-bold text-[#111C2D] block mb-1">Nivel</label>
@@ -390,17 +424,6 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
                 <option value="Mixta / Virtual">Mixta / Virtual</option>
               </select>
             </div>
-
-            {/* Periodo Lectivo */}
-            <div>
-              <label className="font-bold text-[#111C2D] block mb-1">Periodo Lectivo</label>
-              <input
-                type="text"
-                value={periodoLectivo}
-                onChange={(e) => setPeriodoLectivo(e.target.value)}
-                className="w-full bg-[#F8F9FA] border border-slate-200 rounded-xl px-3 py-2 font-semibold text-[#111C2D] outline-none"
-              />
-            </div>
           </div>
 
           {/* Fechas de la Ficha: inicio de la etapa lectiva y finalización */}
@@ -413,6 +436,11 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
                 onChange={(e) => setFechaInicio(e.target.value)}
                 className="w-full bg-[#F8F9FA] border border-slate-200 rounded-xl px-3 py-2 font-medium text-[#111C2D] outline-none"
               />
+              {trimestreDeFecha(trimestresCalendario, fechaInicio) && (
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Trimestre de inicio: <strong>{trimestreDeFecha(trimestresCalendario, fechaInicio)}</strong>
+                </p>
+              )}
             </div>
             <div>
               <label className="font-bold text-[#111C2D] block mb-1">Fecha de Finalización</label>
@@ -458,6 +486,39 @@ export const ModalCrearFicha: React.FC<ModalCrearFichaProps> = ({
                 <option value="" disabled>No hay ambientes registrados aún</option>
               )}
             </select>
+            {ambientePrincipal && (
+              <div className="mt-2">
+                <label className="font-bold text-[#111C2D] block mb-1">Jornada en el ambiente</label>
+                <div className="flex flex-wrap gap-2">
+                  {JORNADAS.map(j => (
+                    <button
+                      key={j}
+                      type="button"
+                      onClick={() => setJornadaAmbiente(j)}
+                      className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors ${
+                        jornadaAmbiente === j
+                          ? 'bg-[#00304D] text-white border-[#00304D]'
+                          : 'bg-[#F8F9FA] text-slate-600 border-slate-200 hover:border-slate-400'
+                      }`}
+                    >
+                      {DETALLE_JORNADA[j]}
+                    </button>
+                  ))}
+                </div>
+                {!jornadaAmbiente && (
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Selecciona la jornada: un ambiente solo puede tener una ficha por jornada mientras su etapa lectiva esté vigente.
+                  </p>
+                )}
+                {conflictoJornada && (
+                  <div className="mt-2 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-[11px] text-rose-700 font-medium">
+                    ⚠ El ambiente <strong>{ambientePrincipal}</strong> ya está ocupado en la jornada {jornadaAmbiente} por la ficha{' '}
+                    <strong>{conflictoJornada.numero_ficha}</strong>
+                    {conflictoJornada.programaNombre ? ` (${conflictoJornada.programaNombre})` : ''}, con etapa lectiva del {conflictoJornada.fechaInicio || '—'} al {conflictoJornada.fechaFin || '—'}. No se puede guardar así.
+                  </div>
+                )}
+              </div>
+            )}
             {ambientes.length === 0 && (
               <p className="text-[10px] text-amber-600 mt-1">
                 ⚠ Aún no hay ambientes registrados. Ve a Parametrizaciones &gt; Ambientes de Formación para agregarlos.
