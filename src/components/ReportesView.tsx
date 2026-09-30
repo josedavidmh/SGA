@@ -1,7 +1,8 @@
 import React from 'react';
-import { FileBarChart2, Users, MapPin, FileSpreadsheet, FileText, AlertTriangle, CalendarRange, TrendingUp, Clock } from 'lucide-react';
+import { FileBarChart2, Users, MapPin, FileSpreadsheet, FileText, AlertTriangle, CalendarRange, TrendingUp, Clock, UserRound } from 'lucide-react';
 import { ReporteCierresIndicadores } from './ReporteCierresIndicadores';
 import { ReporteHorasInstructor } from './ReporteHorasInstructor';
+import { ReporteMisHoras } from './ReporteMisHoras';
 import { ReporteProgramacionTrimestre } from './ReporteProgramacionTrimestre';
 import { User, Instructor, BloqueHorario, Ficha, AmbienteAprendizaje, RegionalCentro } from '../types';
 import { ReportesInstructoresView } from './ReportesInstructoresView';
@@ -20,16 +21,18 @@ interface ReportesViewProps {
   /** Catálogo de ambientes (Parametrizaciones). */
   ambientes?: AmbienteAprendizaje[];
   centro?: RegionalCentro;
+  /** Todas las fichas del sistema (para "Mis horas": sus bloques pueden estar en fichas de otros líderes). */
+  todasLasFichas?: Ficha[];
 }
 
-type SubTabReportes = 'PROGRAMACION' | 'INSTRUCTOR' | 'AMBIENTES' | 'CIERRES' | 'HORAS';
+type SubTabReportes = 'PROGRAMACION' | 'INSTRUCTOR' | 'AMBIENTES' | 'CIERRES' | 'HORAS' | 'MIS_HORAS';
 
 // Sección única que agrupa todos los reportes del sistema (antes vivían
 // sueltos: "Horarios por Instructor" era su propia entrada de menú). Cada
 // reporte queda como una pestaña interna aquí para que crecer la lista de
 // reportes no siga inflando el menú lateral.
 export const ReportesView: React.FC<ReportesViewProps> = (props) => {
-  const [subTab, setSubTab] = React.useState<SubTabReportes>('PROGRAMACION');
+  const [subTab, setSubTab] = React.useState<SubTabReportes>(props.currentUser.rol === 'INSTRUCTOR_LIDER' ? 'MIS_HORAS' : 'PROGRAMACION');
 
   return (
     <div className="space-y-5 pb-12 animate-in fade-in duration-200">
@@ -47,6 +50,16 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
 
       {/* Selector de reporte */}
       <div className="flex items-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-200/80 shadow-xs w-fit flex-wrap">
+        <button
+          type="button"
+          onClick={() => setSubTab('MIS_HORAS')}
+          className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+            subTab === 'MIS_HORAS' ? 'bg-[#0D631B] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <UserRound className="w-4 h-4" />
+          <span>Mis Horas</span>
+        </button>
         <button
           type="button"
           onClick={() => setSubTab('PROGRAMACION')}
@@ -109,6 +122,16 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
           instructores={props.instructores}
           horarios={props.horarios}
           allFichas={props.allFichas}
+        />
+      )}
+
+      {subTab === 'MIS_HORAS' && (
+        <ReporteMisHoras
+          currentUser={props.currentUser}
+          horarios={props.horarios}
+          fichas={props.todasLasFichas || props.allFichas}
+          instructores={props.instructores}
+          centro={props.centro}
         />
       )}
 

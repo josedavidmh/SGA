@@ -3533,6 +3533,7 @@ export default function App() {
               instructores={instructores}
               horarios={horarios}
               allFichas={fichasVisibles}
+              todasLasFichas={fichas}
               ambientes={ambientes}
               centro={centro}
             />
