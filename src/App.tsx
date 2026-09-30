@@ -2598,8 +2598,23 @@ export default function App() {
     const retencion = totalAprendices > 0 ? Number(((activosCount / totalAprendices) * 100).toFixed(1)) : ficha.tasaRetencion ?? 100;
     const desercion = totalAprendices > 0 ? Number((((canceladosCount + retiroVolCount) / totalAprendices) * 100).toFixed(1)) : ficha.tasaDesercion ?? 0;
 
+    // Si la ficha ya tiene un cierre consolidado (estado CERRADA), lo consolidado
+    // prevalece: Juicios sigue actualizando activos, total y avance, pero no pisa
+    // culminados, cancelados, aplazados, retiros ni las tasas del cierre.
+    const cierreConsolidado = ficha.estado === 'CERRADA';
+
     setFichas(prev => prev.map(f => {
       if (f.id !== ficha.id) return f;
+      if (cierreConsolidado) {
+        return {
+          ...f,
+          aprendicesActivos: activosCount,
+          aprendicesCondicionados: condicionadosCount,
+          aprendicesTrasladados: trasladadosCount,
+          totalAprendicesActual: totalAprendices,
+          progresoCurricular: reporte.porcentajeAprobacionFicha
+        };
+      }
       return {
         ...f,
         // matriculaInicial no se toca (queda como dato de registro), pero el
@@ -2620,7 +2635,13 @@ export default function App() {
 
     // Antes estos indicadores solo quedaban en este navegador (y al abrir la
     // app se reiniciaban a 100% / 0%). Ahora se guardan en Supabase.
-    updateFichaInSupabase(ficha.id, {
+    updateFichaInSupabase(ficha.id, cierreConsolidado ? {
+      aprendicesActivos: activosCount,
+      aprendicesCondicionados: condicionadosCount,
+      aprendicesTrasladados: trasladadosCount,
+      totalAprendicesActual: totalAprendices,
+      progresoCurricular: reporte.porcentajeAprobacionFicha
+    } : {
       aprendicesActivos: activosCount,
       aprendicesRetiroVoluntario: retiroVolCount,
       aprendicesCancelados: canceladosCount,
@@ -2655,6 +2676,7 @@ export default function App() {
     return {
       exito: true,
       mensaje: `Juicios Evaluativos procesados para la ficha ${ficha.numero_ficha}: ${rapsCalificados} RAP(s) quedaron CALIFICADO(S) (≥70% de activos aprobados).` +
+        (cierreConsolidado ? ' Esta ficha ya tiene cierre consolidado: se conservaron sus culminados, cancelados, aplazados, retiros y tasas.' : '') +
         (detallesSalto.length > 0 ? ` Se saltaron sin modificar Seguimiento: ${detallesSalto.join(', ')}.` : '') +
         (resultadoInstructores.advertenciasHomonimo.length > 0 ? ` ⚠ Posible(s) homónimo(s): ${resultadoInstructores.advertenciasHomonimo.join(' | ')}` : '')
     };
@@ -3203,9 +3225,30 @@ export default function App() {
     aplazados: number, 
     retiros: number
   ) => {
-    const matricula = (selectedFicha ? totalMatriculados(selectedFicha) : 0) || 35;
-    const retencion = Number(((culminados / matricula) * 100).toFixed(1));
+    const fichaBalance = fichas.find(f => f.id === fichaId) || selectedFicha;
+    const matricula = (fichaBalance ? totalMatriculados(fichaBalance) : 0) || 35;
+    // Igual que en la pantalla de Cierres: con culminados se calcula sobre ellos;
+    // si aún no hay, sobre los aprendices que siguen en formación.
+    const baseRetencion = culminados > 0 ? culminados : (fichaBalance?.aprendicesActivos ?? 0);
+    const retencion = Number(((baseRetencion / matricula) * 100).toFixed(1));
     const desercion = Number((((cancelados + retiros) / matricula) * 100).toFixed(1));
+
+    // El cierre consolidado se guarda en Supabase: antes solo quedaba en pantalla
+    // y al recargar volvían los valores del último cargue de Juicios.
+    updateFichaInSupabase(fichaId, {
+      aprendicesCulminados: culminados,
+      aprendicesCancelados: cancelados,
+      aprendicesAplazados: aplazados,
+      aprendicesRetiroVoluntario: retiros,
+      tasaRetencion: retencion,
+      tasaDesercion: desercion,
+      estado: 'CERRADA'
+    }).then(res => {
+      if (!res.success) {
+        console.error('Error al guardar el cierre consolidado en Supabase:', res.error);
+        alert(`El cierre quedó en pantalla, pero NO se guardó en Supabase:\n\n${res.error}`);
+      }
+    }).catch(err => console.error('Error al guardar el cierre consolidado en Supabase:', err));
 
     setFichas(prev => prev.map(f => {
       if (f.id === fichaId) {
