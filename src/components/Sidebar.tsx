@@ -366,25 +366,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             )}
 
-            {canAccessHorarios && (
-              <button
-                id="nav-btn-reportes"
-                onClick={() => handleSelectTab('reportes')}
-                title="Reportes (Horarios por Instructor, Ambientes por Ficha, y más)"
-                className={`w-full flex items-center ${collapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'} rounded-xl text-xs font-semibold transition-all ${
-                  activeTab === 'reportes'
-                    ? 'bg-[#0D631B] text-white shadow-sm shadow-[#0D631B]/25 font-bold'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-[#111C2D]'
-                }`}
-              >
-                <div className="flex items-center space-x-3">
-                  <FileBarChart2 className="w-4 h-4 shrink-0" />
-                  {!collapsed && <span className="truncate">Reportes</span>}
-                </div>
-                {!collapsed && activeTab === 'reportes' && <ChevronRight className="w-3.5 h-3.5 shrink-0" />}
-              </button>
-            )}
-
             {canAccessSeguimiento && (
               <button
                 id="nav-btn-seguimiento"
@@ -458,6 +439,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {!collapsed && <span className="truncate">Cierres e Indicadores</span>}
                 </div>
                 {!collapsed && activeTab === 'cierres' && <ChevronRight className="w-3.5 h-3.5 shrink-0" />}
+              </button>
+            )}
+
+            {canAccessHorarios && (
+              <button
+                id="nav-btn-reportes"
+                onClick={() => handleSelectTab('reportes')}
+                title="Reportes (Horarios por Instructor, Ambientes por Ficha, y más)"
+                className={`w-full flex items-center ${collapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'} rounded-xl text-xs font-semibold transition-all ${
+                  activeTab === 'reportes'
+                    ? 'bg-[#0D631B] text-white shadow-sm shadow-[#0D631B]/25 font-bold'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-[#111C2D]'
+                }`}
+              >
+                <div className="flex items-center space-x-3">
+                  <FileBarChart2 className="w-4 h-4 shrink-0" />
+                  {!collapsed && <span className="truncate">Reportes</span>}
+                </div>
+                {!collapsed && activeTab === 'reportes' && <ChevronRight className="w-3.5 h-3.5 shrink-0" />}
               </button>
             )}
 

@@ -10,7 +10,8 @@ import {
   Calendar,
   Building,
   GraduationCap,
-  Sparkles
+  Sparkles,
+  AlertTriangle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Ficha, RegionalCentro, User } from '../types';
@@ -72,7 +73,15 @@ export const CierresView: React.FC<CierresProps> = ({
 
   // Cálculo desasistido de fórmulas institucionales (PRD 3.4)
   const matricula = ficha?.matriculaInicial || 35;
-  const tasaRetencion = Number(((culminados / matricula) * 100).toFixed(1));
+  // Retención: mientras la ficha está en formación (aún sin culminados
+  // registrados) se calcula con los aprendices que SIGUEN EN FORMACIÓN
+  // (último cargue de Juicios). Al registrar culminados en el cierre, se
+  // calcula con los culminados.
+  const enFormacion = ficha?.aprendicesActivos ?? matricula;
+  const retencionPorCulminados = culminados > 0;
+  const baseRetencion = retencionPorCulminados ? culminados : enFormacion;
+  const tasaRetencion = Number(((baseRetencion / matricula) * 100).toFixed(1));
+  const META_RETENCION = 80;
   const tasaDesercion = Number((((cancelados + retiros) / matricula) * 100).toFixed(1));
 
   // Totales del Programa: suma la matrícula y los cierres de TODAS las fichas
@@ -84,8 +93,11 @@ export const CierresView: React.FC<CierresProps> = ({
     if (!ficha) return null;
     const fichasPrograma = allFichas.filter(f => f.programaCodigo === ficha.programaCodigo);
     let totalMatricula = 0, totalCulminados = 0, totalCancelados = 0, totalAplazados = 0, totalRetiros = 0;
+    let totalBaseRetencion = 0;
     fichasPrograma.forEach(f => {
       totalMatricula += f.matriculaInicial || 0;
+      const culm = f.id === ficha.id ? culminados : (f.aprendicesCulminados || 0);
+      totalBaseRetencion += culm > 0 ? culm : (f.aprendicesActivos ?? f.matriculaInicial ?? 0);
       if (f.id === ficha.id) {
         totalCulminados += culminados;
         totalCancelados += cancelados;
@@ -107,7 +119,7 @@ export const CierresView: React.FC<CierresProps> = ({
       totalAplazados,
       totalRetiros,
       totalDeserciones,
-      tasaRetencionPrograma: totalMatricula > 0 ? Number(((totalCulminados / totalMatricula) * 100).toFixed(1)) : 0,
+      tasaRetencionPrograma: totalMatricula > 0 ? Number(((totalBaseRetencion / totalMatricula) * 100).toFixed(1)) : 0,
       tasaDesercionPrograma: totalMatricula > 0 ? Number((((totalCancelados + totalRetiros) / totalMatricula) * 100).toFixed(1)) : 0
     };
   }, [ficha, allFichas, culminados, cancelados, aplazados, retiros]);
@@ -183,16 +195,28 @@ export const CierresView: React.FC<CierresProps> = ({
           </div>
 
           <div className="p-3 rounded-xl bg-[#F8F9FA] border border-slate-200 text-xs text-slate-600 font-mono">
-            Tasa Retención = (Aprendices Culminados / Matrícula Inicial) × 100
+            Tasa Retención = ({retencionPorCulminados ? 'Aprendices Culminados' : 'Aprendices en Formación'} / Matrícula Inicial) × 100
             <div className="mt-1 font-bold text-[#111C2D]">
-              = ({culminados} / {matricula}) × 100 = {tasaRetencion}%
+              = ({baseRetencion} / {matricula}) × 100 = {tasaRetencion}%
+            </div>
+            <div className="mt-1 text-[10px] text-slate-400 font-sans">
+              {retencionPorCulminados
+                ? 'Calculada con los culminados registrados en el cierre.'
+                : 'Mientras la ficha está en formación se calcula con los aprendices que siguen en formación (último cargue de Juicios). Al registrar culminados en el cierre pasa a calcularse con ellos.'}
             </div>
           </div>
 
-          <div className="flex items-center space-x-2 text-xs text-slate-500">
-            <CheckCircle2 className="w-4 h-4 text-[#2E7D32]" />
-            <span>Supera la meta institucional mínima del 80%</span>
-          </div>
+          {tasaRetencion >= META_RETENCION ? (
+            <div className="flex items-center space-x-2 text-xs text-slate-500">
+              <CheckCircle2 className="w-4 h-4 text-[#2E7D32]" />
+              <span>Cumple la meta institucional mínima del {META_RETENCION}%</span>
+            </div>
+          ) : (
+            <div className="flex items-center space-x-2 text-xs text-amber-700 font-semibold">
+              <AlertTriangle className="w-4 h-4 text-amber-600" />
+              <span>Por debajo de la meta institucional mínima del {META_RETENCION}%</span>
+            </div>
+          )}
         </div>
 
         {/* Tasa de Deserción */}

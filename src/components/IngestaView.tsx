@@ -134,6 +134,17 @@ export const IngestaView: React.FC<IngestaProps> = ({
   const fileInputRefJuicios = React.useRef<HTMLInputElement>(null);
   const fileInputRefSeguimiento = React.useRef<HTMLInputElement>(null);
 
+  // Auditoría: solo los 5 cargues más recientes (del más nuevo al más viejo).
+  const ultimasIngestas = React.useMemo(() => {
+    const momento = (i: AuditoriaIngesta) => {
+      const m = /(\d{12,})/.exec(i.id || '');
+      if (m) return Number(m[1]);
+      const t = Date.parse(i.fechaHora);
+      return Number.isNaN(t) ? 0 : t;
+    };
+    return [...auditoriaIngestas].sort((a, b) => momento(b) - momento(a)).slice(0, 5);
+  }, [auditoriaIngestas]);
+
   const resetState = () => {
     setIsProcessing(true);
     setArchivoExitoMensaje(null);
@@ -524,7 +535,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
           </div>
         )}
 
-        <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${soloArchivosDeFicha ? '' : 'lg:grid-cols-4'}`}>
+        <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${soloArchivosDeFicha ? '' : 'lg:grid-cols-3'}`}>
           {/* Card 1: Archivo de Seguimiento */}
           {!soloArchivosDeFicha && (
           <div className="p-4 rounded-2xl bg-white border border-[#B3E5FE] shadow-2xs hover:border-[#005A8C] transition-all space-y-2 flex flex-col justify-between">
@@ -687,44 +698,6 @@ export const IngestaView: React.FC<IngestaProps> = ({
             </div>
           </div>
 
-          {/* Card 4: Seguimiento Curricular */}
-          {!soloArchivosDeFicha && (
-          <div className="p-4 rounded-2xl bg-white border border-[#C8E6C9] shadow-2xs hover:border-[#2E7D32] transition-all space-y-2 flex flex-col justify-between">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="w-9 h-9 rounded-xl bg-[#E8F5E9] text-[#2E7D32] flex items-center justify-center font-bold">
-                  <FileSpreadsheet className="w-5 h-5" />
-                </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#E8F5E9] text-[#2E7D32]">
-                  Sintetizado
-                </span>
-              </div>
-              <div className="font-bold text-xs text-[#111C2D]">Seguimiento Curricular</div>
-              <div className="text-[10px] text-slate-400 font-mono">Adso 2694123.xlsx</div>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Detecta forward-fill en actividades combinadas y consolida resultados de aprendizaje (RAP) en el módulo de seguimiento.
-              </p>
-            </div>
-
-            <div className="pt-2 border-t border-slate-100 flex items-center justify-end text-[10px]">
-              <label className="cursor-pointer px-2.5 py-1.5 rounded-xl bg-[#2E7D32] hover:bg-[#205b23] text-white font-bold transition-colors inline-flex items-center space-x-1 shadow-2xs">
-                <UploadCloud className="w-3.5 h-3.5" />
-                <span>Cargar Seguimiento</span>
-                <input 
-                  ref={fileInputRefSeguimiento}
-                  type="file" 
-                  accept=".xlsx,.xls,.csv" 
-                  className="hidden" 
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) processSeguimientoFile(file);
-                    e.target.value = '';
-                  }} 
-                />
-              </label>
-            </div>
-          </div>
-          )}
         </div>
       </div>
 
@@ -1458,7 +1431,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-black text-sm text-[#111C2D]">Auditoría de Ingestas Recientes</h3>
-            <p className="text-xs text-slate-500">Registro trazable de cargues ejecutados en el sistema</p>
+            <p className="text-xs text-slate-500">Los últimos {ultimasIngestas.length} archivos cargados{auditoriaIngestas.length > ultimasIngestas.length ? ` (de ${auditoriaIngestas.length} en total)` : ''}</p>
           </div>
         </div>
 
@@ -1475,7 +1448,7 @@ export const IngestaView: React.FC<IngestaProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {auditoriaIngestas.map(item => (
+              {ultimasIngestas.map(item => (
                 <tr key={item.id} className="hover:bg-[#F8F9FA] transition-colors">
                   <td className="py-3 font-medium text-slate-500">{item.fechaHora}</td>
                   <td className="py-3 font-bold text-[#111C2D] flex items-center space-x-2">
