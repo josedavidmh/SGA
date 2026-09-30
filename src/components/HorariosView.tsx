@@ -51,7 +51,7 @@ import {
   AmbienteAprendizaje,
   TrimestreCalendario
 } from '../types';
-import { fechasDeCorteTrimestre } from '../lib/calendarioTrimestres';
+import { fechasDeCorteTrimestre, trimestreDeFecha, normalizarNombreTrimestre } from '../lib/calendarioTrimestres';
 import { ambienteDelDia, ambienteEfectivo, buscarChoqueAmbiente, excepcionDelDia, origenAmbiente } from '../lib/ambientes';
 import { calcularComparativoCompetencias } from '../services/horasEjecutadasService';
 import { dialogo } from './DialogoSistema';
@@ -191,9 +191,9 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   // Trimestre que se está viendo/editando en la Matriz. Por defecto, el
   // trimestre activo de la ficha (ficha.periodoLectivo) — cambia si el
   // usuario navega a un trimestre anterior/posterior, o si cambia de ficha.
-  const [trimestreSeleccionado, setTrimestreSeleccionado] = React.useState<string>(ficha?.periodoLectivo || '');
+  const [trimestreSeleccionado, setTrimestreSeleccionado] = React.useState<string>(normalizarNombreTrimestre(ficha?.periodoLectivo));
   React.useEffect(() => {
-    if (ficha) setTrimestreSeleccionado(ficha.periodoLectivo);
+    if (ficha) setTrimestreSeleccionado(normalizarNombreTrimestre(ficha.periodoLectivo));
   }, [ficha?.id, ficha?.periodoLectivo]);
 
   // Estado de edición / selección de celda
@@ -628,13 +628,38 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   );
   const anioSeleccionado = trimestreSeleccionadoParseado?.anio ?? fichaTrimestreParseado?.anio ?? new Date().getFullYear();
 
-  const opcionesTrimestre = React.useMemo(() => {
-    return ROMANOS_TRIMESTRE.map(r => `${anioSeleccionado}-${r}`);
-  }, [anioSeleccionado]);
+  // Trimestres de la ficha: desde el trimestre de su fecha de inicio hasta el
+  // de su fecha final MÁS 2 trimestres de margen (por si la ficha se amplía).
+  // Además se incluye cualquier trimestre que ya tenga horario programado, para
+  // que nada quede oculto. Sin fechas en la ficha, se ofrecen los 4 del año.
+  const MARGEN_TRIMESTRES = 2;
+  const { trimestresFicha, trimestreFinLectivo } = React.useMemo(() => {
+    const ini = parsearTrimestre(trimestreDeFecha(trimestresCalendario, ficha.fechaInicio));
+    const fin = parsearTrimestre(trimestreDeFecha(trimestresCalendario, ficha.fechaFin));
+    if (!ini || !fin) return { trimestresFicha: [] as string[], trimestreFinLectivo: '' };
+    const idxIni = ini.anio * 4 + ini.indice;
+    const idxFin = fin.anio * 4 + fin.indice;
+    const lista: string[] = [];
+    for (let i = idxIni; i <= Math.max(idxIni, idxFin) + MARGEN_TRIMESTRES; i++) {
+      lista.push(formatearTrimestre({ anio: Math.floor(i / 4), indice: i % 4 }));
+    }
+    return { trimestresFicha: lista, trimestreFinLectivo: formatearTrimestre(fin) };
+  }, [trimestresCalendario, ficha.fechaInicio, ficha.fechaFin]);
 
-  // Años para el selector: un rango razonable alrededor del año actual de la
-  // ficha (cubre toda la duración típica del programa hacia adelante y atrás)
-  // más cualquier año donde ya exista horario programado para esta ficha.
+  const opcionesTrimestre = React.useMemo(() => {
+    if (trimestresFicha.length === 0) return ROMANOS_TRIMESTRE.map(r => `${anioSeleccionado}-${r}`);
+    const set = new Set(trimestresFicha);
+    horarios.filter(h => h.fichaId === ficha.id && h.trimestre).forEach(h => {
+      const n = normalizarNombreTrimestre(h.trimestre);
+      if (parsearTrimestre(n)) set.add(n);
+    });
+    return Array.from(set).sort(compararTrimestres);
+  }, [trimestresFicha, horarios, ficha.id, anioSeleccionado]);
+  const limitado = trimestresFicha.length > 0;
+
+  // Años para el selector (solo cuando la ficha no tiene fechas): un rango
+  // razonable alrededor del año actual de la ficha, más cualquier año donde
+  // ya exista horario programado para esta ficha.
   const aniosDisponibles = React.useMemo(() => {
     const set = new Set<number>();
     const base = fichaTrimestreParseado?.anio ?? new Date().getFullYear();
@@ -647,12 +672,23 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
     return Array.from(set).sort((a, b) => a - b);
   }, [fichaTrimestreParseado, ficha.id, horarios, anioSeleccionado]);
 
+  // Con rango, las flechas recorren SOLO los trimestres de la ficha.
+  const anteriorPermitido = (): string | null => {
+    if (!limitado) return anteriorTrimestre(trimestreSeleccionado);
+    const i = opcionesTrimestre.indexOf(trimestreSeleccionado);
+    return i > 0 ? opcionesTrimestre[i - 1] : null;
+  };
+  const siguientePermitido = (): string | null => {
+    if (!limitado) return siguienteTrimestre(trimestreSeleccionado);
+    const i = opcionesTrimestre.indexOf(trimestreSeleccionado);
+    return i >= 0 && i < opcionesTrimestre.length - 1 ? opcionesTrimestre[i + 1] : null;
+  };
   const irATrimestreAnterior = () => {
-    const anterior = anteriorTrimestre(trimestreSeleccionado);
+    const anterior = anteriorPermitido();
     if (anterior) setTrimestreSeleccionado(anterior);
   };
   const irATrimestreSiguiente = () => {
-    const siguiente = siguienteTrimestre(trimestreSeleccionado);
+    const siguiente = siguientePermitido();
     if (siguiente) setTrimestreSeleccionado(siguiente);
   };
   const cambiarAnio = (nuevoAnio: number) => {
@@ -1030,6 +1066,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
         {/* Selector de año: cambiarlo salta directo a ese año conservando el
             mismo trimestre romano, en vez de tener que dar varios clics con
             las flechas para cruzar de un año a otro. */}
+        {!limitado && (
         <select
           value={anioSeleccionado}
           onChange={(e) => cambiarAnio(parseInt(e.target.value, 10))}
@@ -1040,12 +1077,13 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
             <option key={a} value={a}>{a}</option>
           ))}
         </select>
+        )}
 
         <div className="flex items-center gap-1.5 flex-1 flex-wrap">
           <button
             type="button"
             onClick={irATrimestreAnterior}
-            disabled={!anteriorTrimestre(trimestreSeleccionado)}
+            disabled={!anteriorPermitido()}
             title="Trimestre anterior"
             className="p-1.5 rounded-lg text-slate-400 hover:text-[#0D631B] hover:bg-emerald-50 transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
           >
@@ -1054,19 +1092,22 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
 
           {opcionesTrimestre.map(t => {
             const esActivo = t === trimestreSeleccionado;
-            const esActualFicha = t === ficha.periodoLectivo;
+            const esActualFicha = t === normalizarNombreTrimestre(ficha.periodoLectivo);
             const tieneBloques = horarios.some(h => h.fichaId === ficha.id && h.trimestre === t);
+            const enMargen = limitado && !!trimestreFinLectivo && compararTrimestres(t, trimestreFinLectivo) > 0;
             return (
               <button
                 key={t}
                 type="button"
                 onClick={() => setTrimestreSeleccionado(t)}
-                title={esActualFicha ? 'Trimestre actual de la ficha' : tieneBloques ? 'Ya tiene horario programado' : 'Sin horario programado todavía'}
+                title={enMargen ? 'Margen de ampliación: posterior a la fecha final de la ficha' : esActualFicha ? 'Trimestre actual de la ficha' : tieneBloques ? 'Ya tiene horario programado' : 'Sin horario programado todavía'}
                 className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all border ${
                   esActivo
                     ? 'bg-[#0D631B] text-white border-[#0D631B]'
                     : esActualFicha
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:border-emerald-400'
+                    : enMargen
+                    ? 'bg-white text-slate-400 border-dashed border-slate-300 hover:border-slate-400'
                     : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-slate-300'
                 }`}
               >
@@ -1078,7 +1119,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
           <button
             type="button"
             onClick={irATrimestreSiguiente}
-            disabled={!siguienteTrimestre(trimestreSeleccionado)}
+            disabled={!siguientePermitido()}
             title="Trimestre siguiente"
             className="p-1.5 rounded-lg text-slate-400 hover:text-[#0D631B] hover:bg-emerald-50 transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
           >
@@ -1100,6 +1141,13 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
           })()}
         </div>
 
+        {limitado && (
+          <div className="text-[10px] font-semibold text-slate-400 sm:text-right shrink-0">
+            Etapa lectiva: {trimestresFicha[0]} → {trimestreFinLectivo}
+            <br />
+            <span className="text-slate-400">+{MARGEN_TRIMESTRES} trimestres de margen (punteado)</span>
+          </div>
+        )}
       </div>
 
       {/* Grilla Principal: Matriz Semanal a la izquierda y Panel de Asignación a
