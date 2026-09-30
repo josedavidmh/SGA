@@ -2,6 +2,7 @@ import React from 'react';
 import { Users, Search, FileSpreadsheet, FileText, Calendar, Clock, ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, AlertOctagon } from 'lucide-react';
 import { User, Instructor, BloqueHorario, Ficha, DiaSemana, FranjaHorario } from '../types';
 import { DIAS, FRANJAS } from './HorariosView';
+import { esBloqueVacante } from '../lib/bloques';
 import { exportarHorariosPorInstructorExcel, exportarHorariosPorInstructorPDF, obtenerBloquesVacantes } from '../services/horariosReporteService';
 import { claveNombrePersona } from '../lib/nombresInstructor';
 
@@ -42,7 +43,7 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
     // Se agrupa por PERSONA (nombre sin tildes, mayúsculas ni "Ing."), no por
     // id: así un mismo instructor que quedó con dos registros o escrito
     // distinto ("José David…" / "JOSE DAVID…") sale una sola vez.
-    horarios.filter(b => b.instructorId).forEach(b => {
+    horarios.filter(b => !esBloqueVacante(b)).forEach(b => {
       const key = claveNombrePersona(b.instructorNombre || '') || b.instructorId!;
       if (!mapa.has(key)) {
         const enPlanta = instructores.find(i => i.id === b.instructorId);
@@ -64,7 +65,7 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
   // Con filtro, todo (resumen y exportación) corresponde SOLO a los
   // instructores filtrados.
   const bloquesFiltrados = React.useMemo(
-    () => (hayFiltro ? gruposFiltrados.flatMap(g => g.bloques) : horarios),
+    () => (hayFiltro ? gruposFiltrados.flatMap(g => g.bloques) : horarios.filter(b => !esBloqueVacante(b))),
     [hayFiltro, gruposFiltrados, horarios]
   );
 

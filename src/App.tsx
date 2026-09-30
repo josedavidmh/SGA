@@ -162,7 +162,8 @@ import {
   AUDITORIA_SISTEMA_INICIAL
 } from './mockData';
 import { generarUuid } from './lib/id';
-import { normalizarNombreTrimestre } from './lib/calendarioTrimestres';
+import { normalizarNombreTrimestre, trimestreDeFecha } from './lib/calendarioTrimestres';
+import { fechaSofiaAISO, restarMeses } from './lib/fechas';
 import { esFichaDelLider, fichasPermitidas, puedeEditarHorarioDeFicha } from './lib/permisos';
 import { homologarInstructores } from './lib/nombresInstructor';
 import { ambienteDelDia, ambienteEfectivo, buscarChoqueAmbiente, claveExcepcionDia, normalizarAmbiente } from './lib/ambientes';
@@ -279,12 +280,18 @@ export default function App() {
     localStorage.setItem('sena_instructores_reales', JSON.stringify(instructores));
   }, [instructores]);
 
-  // Sincronizar selectedFicha únicamente si la ficha seleccionada fue eliminada
+  // Sincronizar selectedFicha: se limpia si la ficha fue eliminada y, si la ficha
+  // cambió en la lista (p.ej. un cargue de Juicios actualizó sus fechas, activos o
+  // tasas), la seleccionada toma esos datos nuevos — antes se quedaba con la copia vieja.
   React.useEffect(() => {
-    if (selectedFicha && !fichas.some(f => f.id === selectedFicha.id)) {
+    if (!selectedFicha) return;
+    const actual = fichas.find(f => f.id === selectedFicha.id);
+    if (!actual) {
       setSelectedFicha(null);
+    } else if (actual !== selectedFicha) {
+      setSelectedFicha(actual);
     }
-  }, [fichas, selectedFicha]);
+  }, [fichas]);
 
   // Programas de Formación (dejando exclusivamente el programa ADSO)
   const [programas, setProgramas] = React.useState<ProgramaFormacion[]>(() => {
@@ -887,11 +894,20 @@ export default function App() {
         );
         const soloLocales = instructoresRef.current.filter(i => !i.id.startsWith('a0000000-0000-0000-0000-') && !existeEnDb(i));
         const idsCambiados = new Map<string, string>();
+        const fallosSubida: string[] = [];
         for (const inst of soloLocales) {
           const idFinal = esUuidValido(inst.id) ? inst.id : generarUuid();
           if (idFinal !== inst.id) idsCambiados.set(inst.id, idFinal);
           const r = await insertInstructorInSupabase({ ...inst, id: idFinal });
-          if (!r.success) console.error(`No se pudo subir a Supabase el instructor ${inst.nombreCompleto}:`, r.error);
+          if (!r.success) {
+            console.error(`No se pudo subir a Supabase el instructor ${inst.nombreCompleto}:`, r.error);
+            fallosSubida.push(`${inst.nombreCompleto}: ${r.error}`);
+          }
+        }
+        // Se avisa una sola vez por sesión para no ser molesto.
+        if (fallosSubida.length > 0 && !sessionStorage.getItem('aviso_instructores_no_subidos')) {
+          try { sessionStorage.setItem('aviso_instructores_no_subidos', '1'); } catch { /* sin storage */ }
+          alert(`Estos instructores solo existen en este navegador y NO se pudieron subir a Supabase (por eso otros usuarios no los ven):\n\n${fallosSubida.join('\n')}`);
         }
         if (idsCambiados.size > 0) {
           setInstructores(prev => prev.map(i => idsCambiados.has(i.id) ? { ...i, id: idsCambiados.get(i.id)! } : i));
@@ -2589,6 +2605,22 @@ export default function App() {
     // matrícula de este cargue (aplazado, cancelado, retiro voluntario,
     // condicionado, etc.), no desde los agregados que traía el archivo.
     const totalAprendices = reporte.aprendices.length;
+
+    // Fechas de la etapa lectiva según el reporte: la fecha fin de SofiaPlus incluye
+    // los 6 meses de etapa productiva, así que se restan para quedar en la lectiva.
+    // El trimestre (periodo lectivo) sale de la fecha de inicio.
+    const fechaInicioReporte = fechaSofiaAISO(reporte.metadata.fechaInicio);
+    const fechaFinReporte = fechaSofiaAISO(reporte.metadata.fechaFin);
+    const fechaFinLectiva = fechaFinReporte ? restarMeses(fechaFinReporte, 6) : '';
+    const fechasFicha: Partial<Ficha> = {};
+    if (fechaInicioReporte) {
+      fechasFicha.fechaInicio = fechaInicioReporte;
+      const trimestreInicio = trimestreDeFecha(trimestresCalendario, fechaInicioReporte);
+      if (trimestreInicio) fechasFicha.periodoLectivo = trimestreInicio;
+    }
+    if (fechaFinLectiva && (!fechaInicioReporte || fechaFinLectiva >= fechaInicioReporte)) {
+      fechasFicha.fechaFin = fechaFinLectiva;
+    }
     const activosCount = reporte.aprendices.filter(a => a.estadoMatricula === 'EN FORMACION' || a.estadoMatricula === 'CONDICIONADO').length;
     const canceladosCount = reporte.aprendices.filter(a => a.estadoMatricula === 'CANCELADO').length;
     const retiroVolCount = reporte.aprendices.filter(a => a.estadoMatricula === 'RETIRO VOLUNTARIO').length;
@@ -2612,11 +2644,13 @@ export default function App() {
           aprendicesCondicionados: condicionadosCount,
           aprendicesTrasladados: trasladadosCount,
           totalAprendicesActual: totalAprendices,
-          progresoCurricular: reporte.porcentajeAprobacionFicha
+          progresoCurricular: reporte.porcentajeAprobacionFicha,
+          ...fechasFicha
         };
       }
       return {
         ...f,
+        ...fechasFicha,
         // matriculaInicial no se toca (queda como dato de registro), pero el
         // total de este cargue se guarda en totalAprendicesActual: es la base
         // de los reportes y fórmulas de retención/deserción (ver lib/aprendices).
@@ -2636,12 +2670,14 @@ export default function App() {
     // Antes estos indicadores solo quedaban en este navegador (y al abrir la
     // app se reiniciaban a 100% / 0%). Ahora se guardan en Supabase.
     updateFichaInSupabase(ficha.id, cierreConsolidado ? {
+      ...fechasFicha,
       aprendicesActivos: activosCount,
       aprendicesCondicionados: condicionadosCount,
       aprendicesTrasladados: trasladadosCount,
       totalAprendicesActual: totalAprendices,
       progresoCurricular: reporte.porcentajeAprobacionFicha
     } : {
+      ...fechasFicha,
       aprendicesActivos: activosCount,
       aprendicesRetiroVoluntario: retiroVolCount,
       aprendicesCancelados: canceladosCount,
@@ -2676,6 +2712,9 @@ export default function App() {
     return {
       exito: true,
       mensaje: `Juicios Evaluativos procesados para la ficha ${ficha.numero_ficha}: ${rapsCalificados} RAP(s) quedaron CALIFICADO(S) (≥70% de activos aprobados).` +
+        (fechasFicha.fechaInicio || fechasFicha.fechaFin
+          ? ` Fechas de la ficha actualizadas: inicio ${fechasFicha.fechaInicio || '(sin cambio)'}, fin de etapa lectiva ${fechasFicha.fechaFin || '(sin cambio)'} (fecha fin del reporte menos 6 meses de etapa productiva).`
+          : '') +
         (cierreConsolidado ? ' Esta ficha ya tiene cierre consolidado: se conservaron sus culminados, cancelados, aplazados, retiros y tasas.' : '') +
         (detallesSalto.length > 0 ? ` Se saltaron sin modificar Seguimiento: ${detallesSalto.join(', ')}.` : '') +
         (resultadoInstructores.advertenciasHomonimo.length > 0 ? ` ⚠ Posible(s) homónimo(s): ${resultadoInstructores.advertenciasHomonimo.join(' | ')}` : '')

@@ -287,7 +287,7 @@ export async function insertInstructorInSupabase(inst: Instructor): Promise<Sync
     return { success: false, error: 'Supabase no configurado' };
   }
   try {
-    const payload = {
+    const payload: any = {
       // Igual que en insertFichaInSupabase: se envía el id (UUID real) generado en el
       // cliente para que no quede desincronizado del id local hasta la próxima sync.
       id: inst.id,
@@ -317,16 +317,38 @@ export async function insertInstructorInSupabase(inst: Instructor): Promise<Sync
       estado: inst.estado || 'ACTIVO'
     };
 
-    const { data, error } = await supabase
+    // El correo es UNIQUE NOT NULL en la tabla. Los instructores detectados
+    // desde Juicios llevan un correo inventado (nombre.apellido@...) que puede
+    // repetirse o venir vacío: se garantiza uno válido y, si choca con otro,
+    // se reintenta con un sufijo único (basado en el id) en vez de fallar.
+    const correoBase = (inst.email || '').trim().toLowerCase()
+      || `instructor.${String(inst.id).replace(/-/g, '').slice(0, 8)}@correo.edu.co`;
+    payload.email = correoBase;
+
+    let { data, error } = await supabase
       .from('instructores')
       .insert([payload])
       .select();
 
+    if (error && error.code === '23505' && /email/i.test(`${error.message} ${error.details || ''}`)) {
+      const [local, dominio] = correoBase.split('@');
+      payload.email = `${local}.${String(inst.id).replace(/-/g, '').slice(0, 6)}@${dominio || 'correo.edu.co'}`;
+      ({ data, error } = await supabase.from('instructores').insert([payload]).select());
+    }
+
+    // Ya existe con ese mismo id (subido antes): no es un fallo.
+    if (error && error.code === '23505' && /(pkey|\(id\))/i.test(`${error.message} ${error.details || ''}`)) {
+      return { success: true, data: [] };
+    }
+
     if (error) {
       const isRls = error.code === '42501' || error.message?.toLowerCase().includes('row-level security');
+      const sinDocumento = error.code === '23502' && /documento/i.test(error.message || '');
       return {
         success: false,
-        error: error.message,
+        error: sinDocumento
+          ? `${error.message}. Corre en Supabase el script 20260929e_instructores_sin_documento.sql.`
+          : error.message,
         isRlsError: isRls
       };
     }
@@ -1241,9 +1263,9 @@ function bloqueASupabasePayload(bloque: BloqueHorario) {
 function explicarErrorBloque(error: { code?: string; message?: string; details?: string | null }): string {
   const msg = error.message || '';
   if (error.code === '23505') {
-    if (msg.includes('instructor')) return 'El instructor ya tiene otra clase ese mismo día y franja en ese trimestre (en esta u otra ficha).';
-    if (msg.includes('ficha')) return 'La ficha ya tiene otro bloque ese mismo día y franja en ese trimestre.';
-    if (msg.includes('ambiente')) return 'El ambiente ya está ocupado ese mismo día y franja en ese trimestre por otra ficha.';
+    if (msg.includes('instructor')) return 'El instructor ya tiene otra clase ese mismo día y franja (en esta u otra ficha). Si es de OTRO trimestre, corre en Supabase el script 20260929l_bloques_unicos_por_trimestre.sql.';
+    if (msg.includes('ficha')) return 'La ficha ya tiene otro bloque ese mismo día y franja. Si es de OTRO trimestre, la base todavía tiene la restricción antigua sin trimestre: corre en Supabase el script 20260929l_bloques_unicos_por_trimestre.sql.';
+    if (msg.includes('ambiente')) return 'El ambiente ya está ocupado ese mismo día y franja por otra ficha. Si es de OTRO trimestre, corre en Supabase el script 20260929l_bloques_unicos_por_trimestre.sql.';
     return `Ya existe un bloque que choca con este (${msg}).`;
   }
   if (error.code === '23503') {

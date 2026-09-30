@@ -8,6 +8,7 @@ import {
   ResultadoAprendizaje
 } from '../types';
 import { contarOcurrenciasDia } from '../lib/festivosColombia';
+import { esBloqueVacante } from '../lib/bloques';
 
 /**
  * Generación de los DOS formatos OFICIALES de SofiaPlus que el líder de
@@ -60,7 +61,7 @@ export function generarFormatoAsociacionFichas(
 
   if (filtroTrimestre) {
     filtroTrimestre.bloquesTrimestre
-      .filter(b => !b.vacante && b.instructorNombre)
+      .filter(b => !esBloqueVacante(b) && b.instructorNombre)
       .forEach(b => {
         const key = b.competenciaCodigo;
         if (!porCompetencia.has(key)) {

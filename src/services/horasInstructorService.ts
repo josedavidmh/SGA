@@ -3,6 +3,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { BloqueHorario, DiaSemana, Ficha, Instructor, RegionalCentro } from '../types';
 import { claveNombrePersona } from '../lib/nombresInstructor';
+import { esBloqueVacante } from '../lib/bloques';
 import { jornadaDeFranja } from '../lib/ambientes';
 import { normalizarNombreTrimestre } from '../lib/calendarioTrimestres';
 
@@ -71,7 +72,7 @@ export function calcularHorasTrimestre(
 
   bloques.forEach(b => {
     const h = b.duracionHoras || 0;
-    if (!b.instructorId && !b.instructorNombre) {
+    if (esBloqueVacante(b)) {
       vacantes.porDia[b.diaSemana] = (vacantes.porDia[b.diaSemana] || 0) + h;
       vacantes.total += h;
       vacantes.bloques += 1;
@@ -106,7 +107,7 @@ export function calcularMatrizHoras(horarios: BloqueHorario[], instructores: Ins
   const mapa = new Map<string, { clave: string; nombre: string; porTrimestre: Record<string, number> }>();
   const totales: Record<string, number> = {};
   horarios.forEach(b => {
-    if (!b.instructorId && !b.instructorNombre) return;
+    if (esBloqueVacante(b)) return;
     const t = trimestreDe(b);
     if (!t) return;
     const nombre = nombreInstructor(b, instructores);

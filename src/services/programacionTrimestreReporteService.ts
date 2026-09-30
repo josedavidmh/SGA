@@ -3,6 +3,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { BloqueHorario, DiaSemana, Ficha, FranjaHorario } from '../types';
 import { claveNombrePersona } from '../lib/nombresInstructor';
+import { esBloqueVacante } from '../lib/bloques';
 
 /**
  * REPORTE CONSOLIDADO: PROGRAMACIÓN DE INSTRUCTORES POR TRIMESTRE Y PROGRAMA
@@ -101,7 +102,7 @@ export function construirProgramacionConsolidada(
   // Colores: un color fijo por instructor (orden alfabético), el mismo en todo el reporte.
   const nombres = new Map<string, string>();
   bloquesSel.forEach(b => {
-    if (!b.instructorId && !b.instructorNombre) return;
+    if (esBloqueVacante(b)) return;
     const k = claveNombrePersona(b.instructorNombre || b.instructorId || '');
     if (k && !nombres.has(k)) nombres.set(k, b.instructorNombre || 'Instructor');
   });
@@ -122,7 +123,7 @@ export function construirProgramacionConsolidada(
       if (enFranja.length === 0) return;
       const celdas: FilaFranja['celdas'] = {};
       enFranja.forEach(b => {
-        const vacante = !b.instructorId;
+        const vacante = esBloqueVacante(b);
         const clave = vacante ? '' : claveNombrePersona(b.instructorNombre || b.instructorId || '');
         const color = vacante ? COLOR_VACANTE : (colorPorClave.get(clave) || PALETA[0]);
         const competencia = `${b.competenciaCodigo}${b.competenciaNombre ? ` · ${abreviar(b.competenciaNombre, 60)}` : ''}`;

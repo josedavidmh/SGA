@@ -1,5 +1,6 @@
 import { ambienteEfectivo } from '../lib/ambientes';
 import { claveNombrePersona } from '../lib/nombresInstructor';
+import { esBloqueVacante } from '../lib/bloques';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -128,7 +129,7 @@ function agruparPorInstructor(bloques: BloqueHorario[]): GrupoInstructor[] {
   // aquí — se reportan aparte, en la lista de espacios por cubrir.
   // Por persona (nombre sin tildes ni títulos), no por id: la misma persona
   // con dos registros o escrita distinto sale una sola vez.
-  bloques.filter(b => b.instructorId).forEach(b => {
+  bloques.filter(b => !esBloqueVacante(b)).forEach(b => {
     const key = claveNombrePersona(b.instructorNombre || '') || b.instructorId!;
     if (!mapa.has(key)) {
       mapa.set(key, { instructorId: b.instructorId!, instructorNombre: b.instructorNombre!, bloques: [] });
@@ -140,7 +141,7 @@ function agruparPorInstructor(bloques: BloqueHorario[]): GrupoInstructor[] {
 
 /** Bloques programados pero sin instructor asignado — espacios pendientes por cubrir. */
 export function obtenerBloquesVacantes(bloques: BloqueHorario[]): BloqueHorario[] {
-  return bloques.filter(b => !b.instructorId);
+  return bloques.filter(esBloqueVacante);
 }
 
 /** Resuelve "Ficha 2694123 (ADSO)" para una fichaId dada, tolerando que no se encuentre. */
