@@ -45,21 +45,38 @@ export interface TrimestreMisHoras {
 export interface MisHoras {
   /** Nombre con el que aparece el instructor. */
   nombre: string;
+  /** Nombres con los que figura en los bloques de horario (para que se vea con quién se cruzó). */
+  nombresEnHorario: string[];
   trimestres: TrimestreMisHoras[]; // más reciente primero
   dias: DiaSemana[];
 }
 
 /**
+ * ¿Es la misma persona? Mismo nombre normalizado, o uno contenido en el otro
+ * (mínimo 2 palabras): "José David Montesino" coincide con
+ * "JOSE DAVID MONTESINO HOYOS" aunque el usuario no tenga el segundo apellido.
+ */
+export function mismaPersonaFlexible(a: string, b: string): boolean {
+  const ka = claveNombrePersona(a);
+  const kb = claveNombrePersona(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  const ta = ka.split(' ');
+  const tb = kb.split(' ');
+  const [corto, largo] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  return corto.length >= 2 && corto.every(w => largo.includes(w));
+}
+
+/**
  * Registros de la planta que corresponden a esta persona: mismo correo, o el
- * mismo nombre (sin tildes ni títulos como "Ing."). Puede haber más de uno si
- * la persona quedó registrada dos veces.
+ * mismo nombre (sin tildes ni títulos, tolerando apellidos de más o de menos).
+ * Puede haber más de uno si la persona quedó registrada dos veces.
  */
 export function instructoresDeUsuario(user: User, instructores: Instructor[]): Instructor[] {
   const correo = normal(user.correo);
-  const clave = claveNombrePersona(user.nombre_completo || '');
   return instructores.filter(i =>
     (correo && normal(i.email) === correo) ||
-    (clave && claveNombrePersona(i.nombreCompleto || `${i.nombres} ${i.apellidos}`) === clave)
+    mismaPersonaFlexible(user.nombre_completo || '', i.nombreCompleto || `${i.nombres} ${i.apellidos}`)
   );
 }
 
@@ -67,24 +84,24 @@ export function trimestresConHorasDe(bloques: BloqueHorario[]): string[] {
   return Array.from(new Set(bloques.map(b => normalizarNombreTrimestre(b.trimestre)).filter(Boolean))).sort().reverse();
 }
 
-/** Bloques (no vacantes) que pertenecen a alguno de los registros dados. */
-export function bloquesDeInstructor(horarios: BloqueHorario[], registros: Instructor[], nombreExtra?: string): BloqueHorario[] {
+/** Bloques (no vacantes), de CUALQUIER ficha, que pertenecen a esta persona. */
+export function bloquesDeInstructor(horarios: BloqueHorario[], registros: Instructor[], nombresExtra: string[] = []): BloqueHorario[] {
   const ids = new Set(registros.map(r => r.id));
-  const claves = new Set(registros.map(r => claveNombrePersona(r.nombreCompleto || `${r.nombres} ${r.apellidos}`)).filter(Boolean));
-  const claveExtra = nombreExtra ? claveNombrePersona(nombreExtra) : '';
-  if (claveExtra) claves.add(claveExtra);
+  const nombres = [
+    ...registros.map(r => r.nombreCompleto || `${r.nombres} ${r.apellidos}`),
+    ...nombresExtra
+  ].filter(Boolean);
   return horarios.filter(b => {
     if (esBloqueVacante(b)) return false;
     if (b.instructorId && ids.has(b.instructorId)) return true;
-    const k = claveNombrePersona(b.instructorNombre || '');
-    return !!k && claves.has(k);
+    return !!b.instructorNombre && nombres.some(n => mismaPersonaFlexible(n, b.instructorNombre!));
   });
 }
 
 export function calcularMisHoras(
-  horarios: BloqueHorario[], fichas: Ficha[], registros: Instructor[], nombre: string
+  horarios: BloqueHorario[], fichas: Ficha[], registros: Instructor[], nombre: string, nombresExtra: string[] = []
 ): MisHoras {
-  const propios = bloquesDeInstructor(horarios, registros, nombre);
+  const propios = bloquesDeInstructor(horarios, registros, [nombre, ...nombresExtra]);
   const fichaPorId = new Map(fichas.map(f => [f.id, f]));
   const mapa = new Map<string, TrimestreMisHoras & { setFichas: Set<string> }>();
 
@@ -124,7 +141,8 @@ export function calcularMisHoras(
     .sort((a, b) => b.trimestre.localeCompare(a.trimestre));
 
   const haySabado = trimestres.some(t => (t.porDia['Sábado'] || 0) > 0);
-  return { nombre, trimestres, dias: haySabado ? ORDEN_DIA : ORDEN_DIA.slice(0, 5) };
+  const nombresEnHorario = Array.from(new Set(propios.map(b => b.instructorNombre || '').filter(Boolean))).sort();
+  return { nombre, nombresEnHorario, trimestres, dias: haySabado ? ORDEN_DIA : ORDEN_DIA.slice(0, 5) };
 }
 
 // ---------------------------------------------------------------------------

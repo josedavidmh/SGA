@@ -29,6 +29,7 @@ import {
 import { 
   AdminView 
 } from './components/AdminView';
+import { RespaldoView } from './components/RespaldoView';
 import { 
   InstructoresView 
 } from './components/InstructoresView';
@@ -1387,17 +1388,17 @@ export default function App() {
     if (user) {
       setCurrentUser(user);
       localStorage.setItem('sena_session_user_id', user.id);
-      if (rol !== 'ADMINISTRADOR' && (activeTab === 'programas' || activeTab === 'competencias' || activeTab === 'admin')) {
+      if (rol !== 'ADMINISTRADOR' && (activeTab === 'programas' || activeTab === 'competencias' || activeTab === 'admin' || activeTab === 'respaldo')) {
         setActiveTab('dashboard');
       }
       if (rol === 'AUXILIAR') {
-        if (activeTab === 'cierres' || activeTab === 'admin' || activeTab === 'instructores') {
+        if (activeTab === 'cierres' || activeTab === 'admin' || activeTab === 'respaldo' || activeTab === 'instructores') {
           setActiveTab('dashboard');
         }
       } else if (rol === 'INSTRUCTOR_LIDER') {
         const fichaLider = fichasPermitidas(fichas, user, instructores)[0] || null;
         setSelectedFicha(fichaLider);
-        if (activeTab === 'admin' || activeTab === 'cierres' || activeTab === 'instructores') {
+        if (activeTab === 'admin' || activeTab === 'respaldo' || activeTab === 'cierres' || activeTab === 'instructores') {
           setActiveTab('dashboard');
         }
       }
@@ -3411,6 +3412,7 @@ export default function App() {
     else if (activeTab === 'cierres') list.push('Cierres e Indicadores');
     else if (activeTab === 'parametrizaciones') list.push('Parametrizaciones y Tablas');
     else if (activeTab === 'admin') list.push('Auditoría y Mantenimiento');
+    else if (activeTab === 'respaldo') list.push('Respaldo y Restauración');
     return list;
   };
 
@@ -3717,6 +3719,10 @@ export default function App() {
               onEditarClaveUsuario={handleEditarClaveUsuario}
               onEditarCorreoUsuario={handleEditarCorreoUsuario}
             />
+          )}
+
+          {activeTab === 'respaldo' && currentUser.rol === 'ADMINISTRADOR' && (
+            <RespaldoView currentUser={currentUser} />
           )}
         </main>
       </div>

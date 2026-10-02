@@ -23,7 +23,8 @@ import {
   X,
   Building2,
   Sliders,
-  FileBarChart2
+  FileBarChart2,
+  DatabaseBackup
 } from 'lucide-react';
 import { User, UserRole, RegionalCentro, Ficha } from '../types';
 
@@ -505,6 +506,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {!collapsed && <span className="truncate">Auditoría y Mantenimiento</span>}
                 </div>
                 {!collapsed && activeTab === 'admin' && <ChevronRight className="w-3.5 h-3.5 shrink-0" />}
+              </button>
+              <button
+                id="nav-btn-respaldo"
+                onClick={() => handleSelectTab('respaldo')}
+                title="Respaldo y Restauración de datos"
+                className={`w-full flex items-center ${collapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'} rounded-xl text-xs font-semibold transition-all ${
+                  activeTab === 'respaldo'
+                    ? 'bg-[#0D631B] text-white shadow-sm shadow-[#0D631B]/25'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-[#111C2D]'
+                }`}
+              >
+                <div className="flex items-center space-x-3">
+                  <DatabaseBackup className="w-4 h-4 shrink-0" />
+                  {!collapsed && <span className="truncate">Respaldo y Restauración</span>}
+                </div>
+                {!collapsed && activeTab === 'respaldo' && <ChevronRight className="w-3.5 h-3.5 shrink-0" />}
               </button>
             </nav>
           </div>

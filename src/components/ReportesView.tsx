@@ -32,6 +32,14 @@ type SubTabReportes = 'PROGRAMACION' | 'INSTRUCTOR' | 'AMBIENTES' | 'CIERRES' | 
 // reporte queda como una pestaña interna aquí para que crecer la lista de
 // reportes no siga inflando el menú lateral.
 export const ReportesView: React.FC<ReportesViewProps> = (props) => {
+  // Programas en los que el usuario tiene fichas: para un Instructor Líder, los
+  // indicadores se calculan con todas las fichas de esos programas.
+  const fichasParaIndicadores = React.useMemo(() => {
+    if (props.currentUser.rol !== 'INSTRUCTOR_LIDER' || !props.todasLasFichas) return props.allFichas;
+    const programas = new Set(props.allFichas.map(f => f.programaCodigo || f.programaNombre));
+    return props.todasLasFichas.filter(f => programas.has(f.programaCodigo || f.programaNombre));
+  }, [props.currentUser.rol, props.allFichas, props.todasLasFichas]);
+
   const [subTab, setSubTab] = React.useState<SubTabReportes>(props.currentUser.rol === 'INSTRUCTOR_LIDER' ? 'MIS_HORAS' : 'PROGRAMACION');
 
   return (
@@ -140,7 +148,10 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
       )}
 
       {subTab === 'CIERRES' && (
-        <ReporteCierresIndicadores allFichas={props.allFichas} centro={props.centro} alcanceInicial="GLOBAL" alcanceFijo />
+        // El Instructor Líder ve la retención y deserción de TODO su programa
+        // (solo totales por programa, sin el detalle de las fichas ajenas);
+        // los demás reportes siguen limitados a sus propias fichas.
+        <ReporteCierresIndicadores allFichas={fichasParaIndicadores} centro={props.centro} alcanceInicial="GLOBAL" alcanceFijo />
       )}
 
       {subTab === 'AMBIENTES' && (

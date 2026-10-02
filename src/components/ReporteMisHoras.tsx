@@ -41,7 +41,11 @@ export const ReporteMisHoras: React.FC<Props> = ({ currentUser, horarios, fichas
   }, [esInstructor, elegidoId, propios, instructores]);
 
   const nombre = registros[0]?.nombreCompleto || currentUser.nombre_completo;
-  const datos = React.useMemo(() => calcularMisHoras(horarios, fichas, registros, nombre), [horarios, fichas, registros, nombre]);
+  const nombresExtra = React.useMemo(
+    () => (esInstructor || !elegidoId ? [currentUser.nombre_completo] : []),
+    [esInstructor, elegidoId, currentUser.nombre_completo]
+  );
+  const datos = React.useMemo(() => calcularMisHoras(horarios, fichas, registros, nombre, nombresExtra), [horarios, fichas, registros, nombre, nombresExtra]);
   const [abierto, setAbierto] = React.useState<string>('');
   const activo = abierto && datos.trimestres.some(t => t.trimestre === abierto) ? abierto : datos.trimestres[0]?.trimestre || '';
   const maxTotal = Math.max(1, ...datos.trimestres.map(t => t.total));
@@ -91,7 +95,7 @@ export const ReporteMisHoras: React.FC<Props> = ({ currentUser, horarios, fichas
         </div>
       </div>
 
-      {registros.length === 0 && (
+      {registros.length === 0 && datos.trimestres.length === 0 && (
         <div className="p-4 rounded-2xl border border-amber-200 bg-amber-50 text-xs text-amber-800 flex items-start space-x-2">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
           <span>
@@ -111,7 +115,13 @@ export const ReporteMisHoras: React.FC<Props> = ({ currentUser, horarios, fichas
       {datos.trimestres.length > 0 && (
         <>
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-100 text-xs font-black text-[#111C2D]">{nombre}</div>
+            <div className="px-4 py-3 border-b border-slate-100">
+              <div className="text-xs font-black text-[#111C2D]">{nombre}</div>
+              <div className="text-[11px] text-slate-500">
+                Incluye todas tus fichas, seas o no líder de ellas.
+                {datos.nombresEnHorario.length > 0 && <> Figura en el horario como: {datos.nombresEnHorario.join(', ')}.</>}
+              </div>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs min-w-[760px]">
                 <thead>
