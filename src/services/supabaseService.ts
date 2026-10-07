@@ -1596,6 +1596,67 @@ export async function deleteEspecialidadFromSupabase(id: string): Promise<SyncRe
 }
 
 // =====================================================================
+// SERVICIO DEL CENTRO DE FORMACIÓN (public.centros_formacion)
+// Solo se guardan el NOMBRE DEL CENTRO y la REGIONAL; el resto de columnas
+// (código y sede) no se tocan.
+// =====================================================================
+
+export interface NombreCentro {
+  centro: string;
+  regional: string;
+}
+
+/** Lee el centro guardado (el registro más antiguo). `null` si no hay o falla. */
+export async function fetchCentroFromSupabase(): Promise<NombreCentro | null> {
+  if (!isSupabaseConfigured) return null;
+  try {
+    const { data, error } = await supabase
+      .from('centros_formacion')
+      .select('centro, regional')
+      .order('created_at', { ascending: true })
+      .limit(1);
+    if (error) {
+      console.warn('Error al consultar el centro de formación en Supabase:', error.message);
+      return null;
+    }
+    const fila: any = data?.[0];
+    if (!fila || !fila.centro) return null;
+    return { centro: String(fila.centro), regional: String(fila.regional || '') };
+  } catch (err: any) {
+    console.error('Excepción al consultar el centro de formación en Supabase:', err);
+    return null;
+  }
+}
+
+/** Actualiza el centro existente (o lo crea si la tabla está vacía). */
+export async function guardarCentroEnSupabase(valor: NombreCentro): Promise<SyncResult<any>> {
+  if (!isSupabaseConfigured) return { success: false, error: 'Supabase no configurado' };
+  try {
+    const ahora = new Date().toISOString();
+    const { data: existentes, error: errLectura } = await supabase
+      .from('centros_formacion')
+      .select('id')
+      .order('created_at', { ascending: true })
+      .limit(1);
+    if (errLectura) {
+      const isRls = errLectura.code === '42501' || errLectura.message?.toLowerCase().includes('row-level security');
+      return { success: false, error: errLectura.message, isRlsError: isRls };
+    }
+    const id = (existentes as any[] | null)?.[0]?.id;
+    const resultado = id
+      ? await supabase.from('centros_formacion').update({ centro: valor.centro, regional: valor.regional, updated_at: ahora }).eq('id', id).select()
+      : await supabase.from('centros_formacion').insert([{ centro: valor.centro, regional: valor.regional }]).select();
+    if (resultado.error) {
+      const isRls = resultado.error.code === '42501' || resultado.error.message?.toLowerCase().includes('row-level security');
+      return { success: false, error: resultado.error.message, isRlsError: isRls };
+    }
+    return { success: true, data: resultado.data };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+// =====================================================================
 // SERVICIO DE TRIMESTRES DE CALENDARIO (public.trimestres_calendario)
 // =====================================================================
 

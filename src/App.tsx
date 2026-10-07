@@ -30,6 +30,7 @@ import {
   AdminView 
 } from './components/AdminView';
 import { RespaldoView } from './components/RespaldoView';
+import { EditarCentroModal } from './components/EditarCentroModal';
 import { 
   InstructoresView 
 } from './components/InstructoresView';
@@ -100,6 +101,8 @@ import {
   upsertProgramaInSupabase,
   deleteProgramaFromSupabase,
   fetchEspecialidadesFromSupabase,
+  fetchCentroFromSupabase,
+  guardarCentroEnSupabase,
   upsertEspecialidadInSupabase,
   deleteEspecialidadFromSupabase,
   fetchTrimestresFromSupabase,
@@ -116,6 +119,7 @@ import {
   fetchHorasEjecutadasFromSupabase,
   reemplazarHorasFichaEnSupabase
 } from './services/supabaseService';
+import { isSupabaseConfigured } from './lib/supabaseClient';
 import { 
   caracterizarInstructoresDesdeJuicios,
   caracterizarInstructoresDesdeHoras,
@@ -149,7 +153,8 @@ import {
   RapSeguimiento,
   EstadoRap,
   HistorialInstructorRap,
-  TrimestreCalendario
+  TrimestreCalendario,
+  RegionalCentro
 } from './types';
 import { 
   CENTRO_FORMACION_DEFAULT, 
@@ -232,7 +237,34 @@ export default function App() {
   const [activeTab, setActiveTab] = React.useState<string>('dashboard');
 
   // Estado del Dominio de Datos
-  const [centro] = React.useState(CENTRO_FORMACION_DEFAULT);
+  // Centro de formación: editable (admin/coordinador) y guardado en este navegador.
+  const [centro, setCentro] = React.useState<RegionalCentro>(() => {
+    try {
+      const guardado = localStorage.getItem('sena_centro_formacion');
+      if (guardado) return { ...CENTRO_FORMACION_DEFAULT, ...JSON.parse(guardado) };
+    } catch { /* sin almacenamiento: se usa el valor por defecto */ }
+    return CENTRO_FORMACION_DEFAULT;
+  });
+  const [modalCentroAbierto, setModalCentroAbierto] = React.useState(false);
+  const handleGuardarCentro = async (nuevo: RegionalCentro) => {
+    // Solo el administrador y el coordinador pueden modificar el centro.
+    if (currentUser.rol !== 'ADMINISTRADOR' && currentUser.rol !== 'COORDINADOR') {
+      setModalCentroAbierto(false);
+      return;
+    }
+    // Se conservan código y sede actuales: solo nombre y regional son editables.
+    const actualizado: RegionalCentro = { ...centro, centro: nuevo.centro, regional: nuevo.regional };
+    setCentro(actualizado);
+    try { localStorage.setItem('sena_centro_formacion', JSON.stringify(actualizado)); } catch { /* ignorar */ }
+    setModalCentroAbierto(false);
+    if (isSupabaseConfigured) {
+      const r = await guardarCentroEnSupabase({ centro: actualizado.centro, regional: actualizado.regional });
+      if (!r.success) {
+        alert(`El centro se guardó solo en este navegador. No se pudo guardar en Supabase: ${r.error || 'error desconocido'}${r.isRlsError ? ' (revisa las políticas RLS de centros_formacion)' : ''}.`);
+      }
+    }
+  };
+
 
   // Fichas reales: inicia completamente vacía (0 fichas) para que el usuario las registre manualmente
   const [fichas, setFichas] = React.useState<Ficha[]>(() => {
@@ -1260,6 +1292,17 @@ export default function App() {
             }
           }
           return merged;
+        });
+      }
+
+      // 11-bis. Centro de formación (nombre y regional compartidos entre equipos)
+      const dbCentro = await fetchCentroFromSupabase();
+      if (dbCentro) {
+        setCentro(prev => {
+          if (prev.centro === dbCentro.centro && prev.regional === dbCentro.regional) return prev;
+          const actualizado = { ...prev, centro: dbCentro.centro, regional: dbCentro.regional };
+          try { localStorage.setItem('sena_centro_formacion', JSON.stringify(actualizado)); } catch { /* ignorar */ }
+          return actualizado;
         });
       }
 
@@ -3448,6 +3491,7 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         centro={centro}
+        onEditarCentro={() => setModalCentroAbierto(true)}
         fichas={fichasVisibles}
         selectedFicha={selectedFicha}
         onSelectFicha={setSelectedFicha}
@@ -3727,6 +3771,11 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* Edición del centro de formación (administrador / coordinador) */}
+      {modalCentroAbierto && (currentUser.rol === 'ADMINISTRADOR' || currentUser.rol === 'COORDINADOR') && (
+        <EditarCentroModal centro={centro} onGuardar={handleGuardarCentro} onCerrar={() => setModalCentroAbierto(false)} />
+      )}
 
       {/* Modal de Creación Manual de Ficha */}
       <ModalCrearFicha

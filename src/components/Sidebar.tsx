@@ -24,7 +24,8 @@ import {
   Building2,
   Sliders,
   FileBarChart2,
-  DatabaseBackup
+  DatabaseBackup,
+  Pencil
 } from 'lucide-react';
 import { User, UserRole, RegionalCentro, Ficha } from '../types';
 
@@ -34,6 +35,8 @@ interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   centro: RegionalCentro;
+  /** Si se entrega, el administrador/coordinador puede editar el nombre del centro. */
+  onEditarCentro?: () => void;
   fichas: Ficha[];
   selectedFicha?: Ficha | null;
   onSelectFicha?: (ficha: Ficha | null) => void;
@@ -56,6 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
   centro,
+  onEditarCentro,
   usersList,
   onOpenModalCrearFicha,
   onOpenModalCrearInstructor,
@@ -78,6 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const canAccessInstructores = currentUser.rol === 'COORDINADOR' || currentUser.rol === 'ADMINISTRADOR';
   const canAccessParametrizaciones = currentUser.rol === 'COORDINADOR' || currentUser.rol === 'ADMINISTRADOR';
   const canAccessAdmin = currentUser.rol === 'ADMINISTRADOR';
+  const puedeEditarCentro = !!onEditarCentro && canAccessParametrizaciones;
   const canCreateFicha = currentUser.rol === 'ADMINISTRADOR' || currentUser.rol === 'COORDINADOR';
   const canAccessProgramas = true;
 
@@ -159,7 +164,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {collapsed ? (
             <div 
               className="w-10 h-10 mx-auto bg-[#F0F4FA] rounded-xl border border-slate-200/80 flex items-center justify-center text-slate-600 hover:text-[#0D631B] transition-colors cursor-pointer"
-              title={`${centro.centro} • ${centro.regional}`}
+              title={`${centro.centro} • ${centro.regional}${puedeEditarCentro ? ' (clic para editar)' : ''}`}
+              onClick={puedeEditarCentro ? onEditarCentro : undefined}
             >
               <Building2 className="w-4 h-4" />
             </div>
@@ -167,7 +173,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="p-2.5 bg-[#F0F4FA] rounded-xl border border-slate-200/60 text-xs">
               <div className="flex items-center justify-between text-slate-500 font-medium text-[10px] mb-0.5">
                 <span>CENTRO DE FORMACIÓN</span>
-                <CheckCircle2 className="w-3 h-3 text-[#2E7D32]" />
+                {puedeEditarCentro ? (
+                  <button
+                    type="button"
+                    onClick={onEditarCentro}
+                    title="Editar centro de formación"
+                    aria-label="Editar centro de formación"
+                    className="p-0.5 -m-0.5 rounded text-slate-400 hover:text-[#0D631B] hover:bg-white transition-colors"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                ) : (
+                  <CheckCircle2 className="w-3 h-3 text-[#2E7D32]" />
+                )}
               </div>
               <div className="font-bold text-[#111C2D] truncate text-xs">{centro.centro}</div>
               <div className="text-[10px] text-slate-500 font-medium truncate">{centro.regional}</div>
