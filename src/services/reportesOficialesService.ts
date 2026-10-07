@@ -8,6 +8,7 @@ import {
 } from '../types';
 import { contarOcurrenciasDia } from '../lib/festivosColombia';
 import { esBloqueVacante } from '../lib/bloques';
+import { claveNombrePersona } from '../lib/nombresInstructor';
 import {
   PALETA, nuevoLibro, descargarLibro, estilarRango, bordeCelda, marcoExterior, celdaDatoExcel,
   encabezadoTablaExcel, configurarHojaExcel, rellenoExcel, fechaGeneracion
@@ -43,9 +44,10 @@ function normalizarTexto(s?: string | null): string {
 
 /**
  * FORMATO ASOCIACION DE FICHAS.
- * Un renglón por cada Competencia con instructor asignado, deduplicado
- * por competencia — una competencia puede tener varios RAPs pero en este
- * formato aparece una sola vez con su instructor.
+ * Un renglón por cada combinación Competencia + Instructor asignada. Una
+ * competencia con varios RAPs aparece una sola vez por instructor, pero si
+ * dos o más instructores dictan RAPs de la misma competencia, cada uno
+ * tiene su propio renglón.
  *
  * Puede descargarse de dos formas:
  * - TOTAL (sin `filtroTrimestre`): usa el Seguimiento acumulado de toda
@@ -67,7 +69,9 @@ export async function generarFormatoAsociacionFichas(
     filtroTrimestre.bloquesTrimestre
       .filter(b => !esBloqueVacante(b) && b.instructorNombre)
       .forEach(b => {
-        const key = b.competenciaCodigo;
+        // Una fila por competencia + instructor: una misma competencia puede
+        // tener varios instructores (cada uno con RAPs distintos).
+        const key = `${b.competenciaCodigo}||${claveNombrePersona(b.instructorNombre!)}`;
         if (!porCompetencia.has(key)) {
           porCompetencia.set(key, {
             competenciaDenominacion: b.competenciaNombre || b.competenciaCodigo,
@@ -79,7 +83,7 @@ export async function generarFormatoAsociacionFichas(
     rapsSeguimientoFicha
       .filter(s => s.instructorNombre)
       .forEach(s => {
-        const key = s.competenciaCodigo;
+        const key = `${s.competenciaCodigo}||${claveNombrePersona(s.instructorNombre!)}`;
         if (!porCompetencia.has(key)) {
           porCompetencia.set(key, {
             competenciaDenominacion: s.competenciaDenominacion,
@@ -89,7 +93,9 @@ export async function generarFormatoAsociacionFichas(
       });
   }
 
-  const filas = Array.from(porCompetencia.values());
+  // Orden estable: por competencia y luego por instructor.
+  const filas = Array.from(porCompetencia.values()).sort((a, b) =>
+    a.competenciaDenominacion.localeCompare(b.competenciaDenominacion, 'es') || a.instructorNombre.localeCompare(b.instructorNombre, 'es'));
   const N = 5;
   const alcance = filtroTrimestre ? `Trimestre ${filtroTrimestre.trimestre}` : 'Total (todos los trimestres)';
 
