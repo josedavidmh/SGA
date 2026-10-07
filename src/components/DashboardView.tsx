@@ -74,7 +74,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
         alert(`No hay bloques de horario programados para la ficha ${f.numero_ficha} en el trimestre ${trimestre}.`);
         return;
       }
-      generarFormatoAsociacionFichas(f, [], { trimestre, bloquesTrimestre });
+      generarFormatoAsociacionFichas(f, [], { trimestre, bloquesTrimestre }, centro);
       return;
     }
 
@@ -83,7 +83,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
       alert('Esta ficha todavía no tiene instructores asignados por competencia en Seguimiento — no hay nada que exportar.');
       return;
     }
-    generarFormatoAsociacionFichas(f, seguimientoFicha);
+    generarFormatoAsociacionFichas(f, seguimientoFicha, undefined, centro);
   };
 
   const handleDescargarEventos = (f: Ficha | null, trimestre: string) => {

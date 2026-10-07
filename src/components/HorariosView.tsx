@@ -49,7 +49,8 @@ import {
   RegistroHorasEjecutadas,
   ActividadSeguimiento,
   AmbienteAprendizaje,
-  TrimestreCalendario
+  TrimestreCalendario,
+  RegionalCentro
 } from '../types';
 import { fechasDeCorteTrimestre, trimestreDeFecha, normalizarNombreTrimestre } from '../lib/calendarioTrimestres';
 import { ambienteDelDia, ambienteEfectivo, buscarChoqueAmbiente, excepcionDelDia, origenAmbiente } from '../lib/ambientes';
@@ -63,6 +64,8 @@ import {
 import { evaluarAfinidadInstructor, EvaluacionAfinidadInstructor } from '../services/instructorRecomendacionService';
 
 interface HorariosProps {
+  /** Regional/centro: encabezado de los reportes exportados. */
+  centro?: RegionalCentro;
   currentUser: User;
   ficha: Ficha | null;
   allFichas: Ficha[];
@@ -161,6 +164,7 @@ export const HorariosView: React.FC<HorariosProps> = (props) => (
 );
 
 const HorariosViewInterno: React.FC<HorariosProps> = ({
+  centro,
   currentUser,
   ficha,
   instructores,
@@ -1000,6 +1004,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
         <ReportesHorarioPanel
           ficha={ficha}
           currentFichaBloques={currentFichaBloques}
+          centro={centro}
           onNavigateToReportesInstructores={onNavigateToReportesInstructores}
         />
       ) : (
@@ -2157,6 +2162,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
 interface ReportesHorarioPanelProps {
   ficha: Ficha;
   currentFichaBloques: BloqueHorario[];
+  centro?: RegionalCentro;
   onNavigateToReportesInstructores?: () => void;
 }
 
@@ -2165,7 +2171,7 @@ interface ReportesHorarioPanelProps {
 // ReportesInstructoresView, en el menú lateral) porque un instructor puede
 // tener bloques en fichas de programas distintos — no tiene sentido acotarlo
 // a la ficha que se esté viendo aquí.
-const ReportesHorarioPanel: React.FC<ReportesHorarioPanelProps> = ({ ficha, currentFichaBloques, onNavigateToReportesInstructores }) => {
+const ReportesHorarioPanel: React.FC<ReportesHorarioPanelProps> = ({ ficha, currentFichaBloques, centro, onNavigateToReportesInstructores }) => {
   const totalHoras = currentFichaBloques.reduce((acc, b) => acc + b.duracionHoras, 0);
   const hayBloques = currentFichaBloques.length > 0;
 
@@ -2207,7 +2213,7 @@ const ReportesHorarioPanel: React.FC<ReportesHorarioPanelProps> = ({ ficha, curr
           <div className="flex items-center gap-2 pt-1">
             <button
               type="button"
-              onClick={() => exportarHorarioFichaExcel(ficha, currentFichaBloques, DIAS, FRANJAS)}
+              onClick={() => exportarHorarioFichaExcel(ficha, currentFichaBloques, DIAS, FRANJAS, centro)}
               className="flex-1 flex items-center justify-center space-x-1.5 bg-[#0D631B] hover:bg-[#0a4d15] text-white px-3 py-2 rounded-xl text-xs font-bold shadow-sm transition-all"
             >
               <FileSpreadsheet className="w-4 h-4" />
@@ -2215,7 +2221,7 @@ const ReportesHorarioPanel: React.FC<ReportesHorarioPanelProps> = ({ ficha, curr
             </button>
             <button
               type="button"
-              onClick={() => exportarHorarioFichaPDF(ficha, currentFichaBloques, DIAS, FRANJAS)}
+              onClick={() => exportarHorarioFichaPDF(ficha, currentFichaBloques, DIAS, FRANJAS, centro)}
               className="flex-1 flex items-center justify-center space-x-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl text-xs font-bold shadow-xs transition-all"
             >
               <FileText className="w-4 h-4 text-red-500" />

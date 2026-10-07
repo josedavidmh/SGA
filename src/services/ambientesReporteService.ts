@@ -1,7 +1,12 @@
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Ficha, BloqueHorario, AmbienteAprendizaje } from '../types';
+import { Ficha, BloqueHorario, AmbienteAprendizaje, RegionalCentro } from '../types';
+import {
+  PALETA, PDF, MARGEN_PDF, nuevoLibro, descargarLibro, bandaTituloExcel, encabezadoTablaExcel, celdaDatoExcel,
+  filaTotalExcel, notaPieExcel, configurarHojaExcel, marcoExterior, textoCentro, fechaGeneracion,
+  bandaTituloPdf, temaTablaPdf, pieDePaginasPdf
+} from '../lib/estiloReporte';
 import { ambienteEfectivo, esAmbienteGenerico, normalizarAmbiente, jornadaDeFranja, ocupaAmbiente, fichaVencida, rangosSeSolapan, ORDEN_JORNADA } from '../lib/ambientes';
 
 const COLOR_ENCABEZADO: [number, number, number] = [13, 99, 27];
@@ -346,70 +351,147 @@ export function calcularAmbientesConFichas(
 const alertaFicha = (f: FichaEnAmbiente) =>
   f.duplicada ? 'Ambiente duplicado en la jornada' : f.vencida && f.uso === 'BASE' ? 'Etapa lectiva finalizada' : f.uso === 'BASE' && f.sinJornada ? 'Falta asignar jornada' : '';
 
-export function exportarAmbientesConFichasExcel(items: AmbienteConFichas[], trimestreFiltro: string = 'TODOS') {
-  const wsData: (string | number)[][] = [
-    ['SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR - AMBIENTES Y SUS FICHAS'],
-    [trimestreFiltro === 'TODOS' ? 'Todos los trimestres' : `Trimestre: ${trimestreFiltro}`],
-    [`AMBIENTES: ${items.length} | CON FICHAS: ${items.filter(i => i.fichas.length > 0).length}`],
-    [],
-    ['AMBIENTE', 'TIPO', 'SEDE', 'CAPACIDAD', 'FICHA', 'PROGRAMA', 'USO', 'JORNADA', 'DÍAS Y FRANJAS', 'BLOQUES', 'HORAS/SEM', 'ALERTA']
-  ];
-  items.forEach(a => {
-    if (a.fichas.length === 0) {
-      wsData.push([a.ambiente, a.tipo || '', a.sede || '', a.capacidad ?? '', '—', 'Libre', '', '', '', 0, 0, '']);
-      return;
+const etiquetaTrimestre = (t: string) => (t === 'TODOS' ? 'Todos los trimestres' : `Trimestre ${t}`);
+
+export async function exportarAmbientesConFichasExcel(items: AmbienteConFichas[], trimestreFiltro: string = 'TODOS', centro?: RegionalCentro) {
+  const libres = items.filter(i => i.fichas.length === 0).length;
+  const alertas = items.reduce((a, i) => a + i.fichas.filter(f => alertaFicha(f)).length, 0);
+  const columnas = ['AMBIENTE', 'TIPO', 'SEDE', 'CAPACIDAD', 'FICHA', 'PROGRAMA', 'USO', 'JORNADA', 'DÍAS Y FRANJAS', 'BLOQUES', 'HORAS / SEM', 'ALERTA'];
+  const anchos = [28, 14, 16, 11, 12, 38, 12, 14, 52, 10, 11, 28];
+  const N = columnas.length;
+
+  const wb = nuevoLibro();
+  const ws = wb.addWorksheet('Ambientes y Fichas');
+  ws.columns = anchos.map(width => ({ width }));
+  const meta = `${[textoCentro(centro), `${items.length} ambiente(s)`, `${items.length - libres} con fichas`, `${libres} libre(s)`, alertas > 0 ? `${alertas} alerta(s)` : 'sin alertas', `Generado el ${fechaGeneracion()}`].filter(Boolean).join('  ·  ')}`;
+  const filaEnc = bandaTituloExcel(ws, N, 'Ambientes y sus Fichas', `Asociación de fichas por ambiente de aprendizaje — ${etiquetaTrimestre(trimestreFiltro)}`, meta);
+  encabezadoTablaExcel(ws, filaEnc, columnas);
+
+  let fila = filaEnc + 1;
+  let totalBloques = 0;
+  let totalHoras = 0;
+  let totalFichas = 0;
+  items.forEach((a, idx) => {
+    const relleno = idx % 2 === 0 ? PALETA.blanco : PALETA.zebra;
+    const lineas = a.fichas.length === 0 ? [null] : a.fichas;
+    const inicio = fila;
+    lineas.forEach(f => {
+      const valores: (string | number)[] = f
+        ? [
+            a.ambiente, a.tipo || '', a.sede || '', a.capacidad ?? '',
+            f.fichaNumero, f.programaNombre, f.uso === 'BASE' ? 'Base' : 'Excepción', f.jornada || (f.uso === 'BASE' ? 'Sin jornada' : ''),
+            f.horario, f.bloques, f.horas, alertaFicha(f)
+          ]
+        : [a.ambiente, a.tipo || '', a.sede || '', a.capacidad ?? '', '—', 'Libre — sin fichas asociadas', '', '', '', 0, 0, ''];
+      valores.forEach((v, c) => {
+        const cel = ws.getCell(fila, c + 1);
+        cel.value = v as any;
+        const centrado = c === 3 || c === 4 || c === 6 || c === 7 || c === 9 || c === 10;
+        celdaDatoExcel(cel, { horizontal: centrado ? 'center' : 'left', relleno, negrita: c === 0 || c === 4 });
+      });
+      // Resaltes: excepción, libre y alertas.
+      if (f?.uso === 'EXCEPCION' || (f && f.uso !== 'BASE')) {
+        celdaDatoExcel(ws.getCell(fila, 7), { horizontal: 'center', relleno, negrita: true, color: PALETA.morado });
+      }
+      if (!f) {
+        celdaDatoExcel(ws.getCell(fila, 6), { relleno, cursiva: true, color: PALETA.gris });
+      }
+      const textoAlerta = f ? alertaFicha(f) : '';
+      if (textoAlerta) {
+        celdaDatoExcel(ws.getCell(fila, 12), { relleno: PALETA.ambar, negrita: true, color: PALETA.ambarTexto });
+      }
+      ws.getRow(fila).height = f && String(f.horario || '').length > 55 ? 32 : 22;
+      if (f) { totalBloques += f.bloques; totalHoras += f.horas; totalFichas += 1; }
+      fila++;
+    });
+    // El ambiente (y sus datos) se combina en una sola celda por grupo de fichas.
+    if (fila - 1 > inicio) {
+      for (let c = 1; c <= 4; c++) ws.mergeCells(inicio, c, fila - 1, c);
     }
-    a.fichas.forEach(f => wsData.push([
-      a.ambiente, a.tipo || '', a.sede || '', a.capacidad ?? '',
-      f.fichaNumero, f.programaNombre, f.uso === 'BASE' ? 'Base' : 'Excepción', f.jornada || (f.uso === 'BASE' ? 'Sin jornada' : ''),
-      f.horario, f.bloques, f.horas, alertaFicha(f)
-    ]));
+    for (let c = 1; c <= 4; c++) {
+      ws.getCell(inicio, c).alignment = { vertical: 'middle', horizontal: c === 1 ? 'left' : 'center', wrapText: true, indent: c === 1 ? 1 : 0 };
+    }
   });
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 36 }, { wch: 11 }, { wch: 14 }, { wch: 50 }, { wch: 9 }, { wch: 10 }, { wch: 26 }];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Ambientes y Fichas');
-  XLSX.writeFile(wb, `Ambientes_y_Fichas_${trimestreFiltro === 'TODOS' ? 'Todos' : trimestreFiltro}.xlsx`);
+
+  if (items.length === 0) {
+    ws.mergeCells(fila, 1, fila, N);
+    celdaDatoExcel(ws.getCell(fila, 1), { cursiva: true, color: PALETA.gris, horizontal: 'center' });
+    ws.getCell(fila, 1).value = 'No hay ambientes para este filtro.';
+    fila++;
+  }
+
+  filaTotalExcel(ws, fila, ['TOTAL', '', '', '', `${totalFichas} ficha(s)`, '', '', '', '', totalBloques, totalHoras, alertas > 0 ? `${alertas} alerta(s)` : '']);
+  marcoExterior(ws, filaEnc, 1, fila, N);
+  notaPieExcel(ws, fila + 2, N, 'Uso "Base": ambiente principal de la ficha. Uso "Excepción": la ficha lo usa solo en días/franjas puntuales. Las alertas indican ambiente duplicado en la jornada, etapa lectiva finalizada o jornada sin asignar.');
+  configurarHojaExcel(ws, { filaEncabezado: filaEnc, congelarColumnas: 1 });
+  await descargarLibro(wb, `Ambientes_y_Fichas_${trimestreFiltro === 'TODOS' ? 'Todos' : trimestreFiltro}.xlsx`);
 }
 
-export function exportarAmbientesConFichasPDF(items: AmbienteConFichas[], trimestreFiltro: string = 'TODOS') {
+export function exportarAmbientesConFichasPDF(items: AmbienteConFichas[], trimestreFiltro: string = 'TODOS', centro?: RegionalCentro) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-  doc.setFontSize(13);
-  doc.setFont('helvetica', 'bold');
-  doc.text('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR', 40, 36);
-  doc.setFontSize(11);
-  doc.text('Ambientes y sus Fichas', 40, 54);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text(`${trimestreFiltro === 'TODOS' ? 'Todos los trimestres' : `Trimestre: ${trimestreFiltro}`} — ${items.length} ambiente(s)`, 40, 70);
-  const body: (string | number)[][] = [];
-  items.forEach(a => {
+  const libres = items.filter(i => i.fichas.length === 0).length;
+  const alertas = items.reduce((a, i) => a + i.fichas.filter(f => alertaFicha(f)).length, 0);
+  const startY = bandaTituloPdf(
+    doc,
+    'Ambientes y sus Fichas',
+    `Asociación de fichas por ambiente de aprendizaje — ${etiquetaTrimestre(trimestreFiltro)}`,
+    `${items.length} ambiente(s)  ·  ${items.length - libres} con fichas  ·  ${libres} libre(s)  ·  ${alertas > 0 ? `${alertas} alerta(s)` : 'sin alertas'}`
+  );
+
+  const body: any[][] = [];
+  let totalHoras = 0;
+  let totalFichas = 0;
+  items.forEach((a, idx) => {
+    const fondo = idx % 2 === 0 ? [255, 255, 255] : PDF.zebra;
     if (a.fichas.length === 0) {
-      body.push([a.ambiente, '—', 'Libre', '', '', '']);
+      body.push([
+        { content: a.ambiente, styles: { fontStyle: 'bold', fillColor: fondo } },
+        { content: 'Libre — sin fichas asociadas', colSpan: 5, styles: { fontStyle: 'italic', textColor: PDF.gris, fillColor: fondo } }
+      ]);
       return;
     }
-    a.fichas.forEach((f, i) => body.push([
-      i === 0 ? a.ambiente : '',
-      `${f.fichaNumero}\n${f.programaNombre}`,
-      f.uso === 'BASE' ? 'Base' : 'Excepción',
-      f.jornada || (f.uso === 'BASE' ? 'Sin jornada' : '—'),
-      f.horario + (alertaFicha(f) ? `\n⚠ ${alertaFicha(f)}` : ''),
-      `${f.horas}h`
-    ]));
+    a.fichas.forEach((f, i) => {
+      totalHoras += f.horas;
+      totalFichas += 1;
+      const alerta = alertaFicha(f);
+      const fila: any[] = [];
+      if (i === 0) {
+        fila.push({
+          content: `${a.ambiente}${a.tipo ? `\n${a.tipo}` : ''}${a.capacidad ? ` · cap. ${a.capacidad}` : ''}`,
+          rowSpan: a.fichas.length,
+          styles: { fontStyle: 'bold', valign: 'middle', fillColor: fondo }
+        });
+      }
+      fila.push(
+        { content: `${f.fichaNumero}\n${f.programaNombre}`, styles: { fillColor: fondo } },
+        { content: f.uso === 'BASE' ? 'Base' : 'Excepción', styles: { halign: 'center', fillColor: fondo, ...(f.uso !== 'BASE' ? { textColor: PDF.morado, fontStyle: 'bold' } : {}) } },
+        { content: f.jornada || (f.uso === 'BASE' ? 'Sin jornada' : '—'), styles: { halign: 'center', fillColor: fondo } },
+        { content: f.horario + (alerta ? `\n⚠ ${alerta}` : ''), styles: { fillColor: alerta ? PDF.ambar : fondo, ...(alerta ? { textColor: PDF.ambarTexto } : {}) } },
+        { content: `${f.horas}h`, styles: { halign: 'center', fontStyle: 'bold', fillColor: fondo } }
+      );
+      body.push(fila);
+    });
   });
+  if (items.length === 0) body.push([{ content: 'No hay ambientes para este filtro.', colSpan: 6, styles: { halign: 'center', fontStyle: 'italic', textColor: PDF.gris } }]);
+
+  const tema = temaTablaPdf(7.5);
   autoTable(doc, {
-    startY: 84,
+    ...tema,
+    startY,
     head: [['Ambiente', 'Ficha / Programa', 'Uso', 'Jornada', 'Días y franjas', 'Horas/sem']],
     body,
-    styles: { fontSize: 7.5, cellPadding: 4, valign: 'top' },
-    headStyles: { fillColor: COLOR_ENCABEZADO, textColor: 255, fontStyle: 'bold' },
-    columnStyles: { 0: { cellWidth: 150, fontStyle: 'bold' }, 1: { cellWidth: 190 }, 2: { cellWidth: 55 }, 3: { cellWidth: 60 }, 4: { cellWidth: 245 }, 5: { cellWidth: 50 } },
-    didParseCell: (data) => {
-      if (data.section === 'body' && data.column.index === 2 && String(data.cell.raw) === 'Excepción') {
-        data.cell.styles.textColor = [109, 40, 217];
-        data.cell.styles.fontStyle = 'bold';
-      }
-    }
+    foot: [[
+      { content: 'TOTAL', styles: { halign: 'left' } },
+      { content: `${totalFichas} ficha(s)`, styles: { halign: 'left' } }, '', '', '',
+      { content: `${totalHoras}h`, styles: { halign: 'center' } }
+    ]],
+    showFoot: 'lastPage',
+    footStyles: { fillColor: PDF.total, textColor: PDF.pizarra, fontStyle: 'bold', lineColor: PDF.pizarra, lineWidth: { top: 1.4, left: 0.6, right: 0.6, bottom: 0.6 } },
+    alternateRowStyles: {},
+    tableWidth: doc.internal.pageSize.getWidth() - MARGEN_PDF * 2,
+    columnStyles: { 0: { cellWidth: 140 }, 1: { cellWidth: 190 }, 2: { cellWidth: 55 }, 3: { cellWidth: 62 }, 4: { cellWidth: 'auto' }, 5: { cellWidth: 50 } }
   });
+
+  pieDePaginasPdf(doc, centro);
   doc.save(`Ambientes_y_Fichas_${trimestreFiltro === 'TODOS' ? 'Todos' : trimestreFiltro}.pdf`);
 }

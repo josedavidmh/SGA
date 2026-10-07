@@ -300,7 +300,7 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
         alert(`No hay bloques de horario programados para la ficha ${fichaToExport.numero_ficha} en el trimestre ${trimestre}.`);
         return;
       }
-      generarFormatoAsociacionFichas(fichaToExport, [], { trimestre, bloquesTrimestre });
+      generarFormatoAsociacionFichas(fichaToExport, [], { trimestre, bloquesTrimestre }, centro);
       return;
     }
 
@@ -311,7 +311,7 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
       alert('Esta ficha todavía no tiene instructores asignados por competencia en Seguimiento — no hay nada que exportar.');
       return;
     }
-    generarFormatoAsociacionFichas(fichaToExport, seguimientoFicha);
+    generarFormatoAsociacionFichas(fichaToExport, seguimientoFicha, undefined, centro);
   };
 
   const handleDescargarReporteEventos = (targetFicha: Ficha | null, trimestre: string) => {

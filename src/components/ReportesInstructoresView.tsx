@@ -1,6 +1,6 @@
 import React from 'react';
 import { Users, Search, FileSpreadsheet, FileText, Calendar, Clock, ChevronDown, ChevronUp, ChevronsDown, ChevronsUp, AlertOctagon } from 'lucide-react';
-import { User, Instructor, BloqueHorario, Ficha, DiaSemana, FranjaHorario } from '../types';
+import { User, Instructor, BloqueHorario, Ficha, DiaSemana, FranjaHorario , RegionalCentro } from '../types';
 import { DIAS, FRANJAS } from './HorariosView';
 import { esBloqueVacante } from '../lib/bloques';
 import { exportarHorariosPorInstructorExcel, exportarHorariosPorInstructorPDF, obtenerBloquesVacantes } from '../services/horariosReporteService';
@@ -11,6 +11,7 @@ interface ReportesInstructoresViewProps {
   instructores: Instructor[];
   horarios: BloqueHorario[];
   allFichas: Ficha[];
+  centro?: RegionalCentro;
 }
 
 interface GrupoInstructor {
@@ -26,7 +27,7 @@ const ORDEN_FRANJA: Record<FranjaHorario, number> = FRANJAS.reduce((acc, f, i) =
 // cada instructor en TODAS las fichas y programas donde tenga clase — por eso
 // vive en el menú lateral como su propia sección, en vez de dentro de
 // Horarios (que está acotado a una ficha a la vez).
-export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> = ({ instructores, horarios, allFichas }) => {
+export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> = ({ instructores, horarios, allFichas, centro }) => {
   const [busqueda, setBusqueda] = React.useState('');
   const [expandido, setExpandido] = React.useState<Record<string, boolean>>({});
 
@@ -123,7 +124,7 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => exportarHorariosPorInstructorExcel(bloquesFiltrados, DIAS, FRANJAS, fichasPorId)}
+            onClick={() => exportarHorariosPorInstructorExcel(bloquesFiltrados, DIAS, FRANJAS, fichasPorId, centro)}
             className="flex items-center space-x-1.5 bg-[#0D631B] hover:bg-[#0a4d15] text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition-all"
           >
             <FileSpreadsheet className="w-4 h-4" />
@@ -131,7 +132,7 @@ export const ReportesInstructoresView: React.FC<ReportesInstructoresViewProps> =
           </button>
           <button
             type="button"
-            onClick={() => exportarHorariosPorInstructorPDF(bloquesFiltrados, DIAS, FRANJAS, fichasPorId)}
+            onClick={() => exportarHorariosPorInstructorPDF(bloquesFiltrados, DIAS, FRANJAS, fichasPorId, centro)}
             className="flex items-center space-x-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-all"
           >
             <FileText className="w-4 h-4 text-red-500" />

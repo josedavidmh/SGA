@@ -3527,6 +3527,7 @@ export default function App() {
 
           {activeTab === 'horarios' && (
             <HorariosView
+              centro={centro}
               currentUser={currentUser}
               ficha={selectedFicha}
               allFichas={fichasVisibles}

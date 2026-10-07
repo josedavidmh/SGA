@@ -130,6 +130,7 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
           instructores={props.instructores}
           horarios={props.horarios}
           allFichas={props.allFichas}
+          centro={props.centro}
         />
       )}
 
@@ -155,7 +156,7 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
       )}
 
       {subTab === 'AMBIENTES' && (
-        <ReporteAmbientesConFichas horarios={props.horarios} allFichas={props.allFichas} ambientes={props.ambientes || []} />
+        <ReporteAmbientesConFichas horarios={props.horarios} allFichas={props.allFichas} ambientes={props.ambientes || []} centro={props.centro} />
       )}
     </div>
   );
@@ -169,9 +170,10 @@ interface ReporteAmbientesConFichasProps {
   horarios: BloqueHorario[];
   allFichas: Ficha[];
   ambientes: AmbienteAprendizaje[];
+  centro?: RegionalCentro;
 }
 
-const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ horarios, allFichas, ambientes }) => {
+const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ horarios, allFichas, ambientes, centro }) => {
   const trimestresDisponibles = React.useMemo(() => obtenerTrimestresDisponibles(horarios), [horarios]);
   const [trimestreFiltro, setTrimestreFiltro] = React.useState<string>(() => trimestresDisponibles[0] || 'TODOS');
   const [busqueda, setBusqueda] = React.useState('');
@@ -221,7 +223,7 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
           </select>
           <button
             type="button"
-            onClick={() => exportarAmbientesConFichasExcel(itemsFiltrados, trimestreFiltro)}
+            onClick={() => exportarAmbientesConFichasExcel(itemsFiltrados, trimestreFiltro, centro)}
             className="flex items-center space-x-1.5 bg-[#0D631B] hover:bg-[#0a4d15] text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition-all"
           >
             <FileSpreadsheet className="w-4 h-4" />
@@ -229,7 +231,7 @@ const ReporteAmbientesConFichas: React.FC<ReporteAmbientesConFichasProps> = ({ h
           </button>
           <button
             type="button"
-            onClick={() => exportarAmbientesConFichasPDF(itemsFiltrados, trimestreFiltro)}
+            onClick={() => exportarAmbientesConFichasPDF(itemsFiltrados, trimestreFiltro, centro)}
             className="flex items-center space-x-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-all"
           >
             <FileText className="w-4 h-4 text-red-500" />
