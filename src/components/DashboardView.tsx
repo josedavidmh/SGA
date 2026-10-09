@@ -51,10 +51,19 @@ export const DashboardView: React.FC<DashboardProps> = ({
   onOpenModalCrearFicha
 }) => {
   const [trimestreLider, setTrimestreLider] = React.useState<string>('');
-  const [fichaCoord, setFichaCoord] = React.useState<string>('');
   const [trimestreCoord, setTrimestreCoord] = React.useState<string>('');
   const [asociacionTrimestreLider, setAsociacionTrimestreLider] = React.useState<string>('');
   const [asociacionTrimestreCoord, setAsociacionTrimestreCoord] = React.useState<string>('');
+
+  // La ficha a exportar es la seleccionada en la parte superior (Header).
+  const fichaCoord: Ficha | null = ficha ? (allFichas.find(f => f.id === ficha.id) || ficha) : null;
+  // Al cambiar de ficha se reinician los trimestres elegidos.
+  React.useEffect(() => {
+    setTrimestreCoord('');
+    setAsociacionTrimestreCoord('');
+    setTrimestreLider('');
+    setAsociacionTrimestreLider('');
+  }, [ficha?.id]);
 
   // Mismo formato que la Matriz de Horarios ("AAAA-ROMANO", ej. "2026-III").
   const etiquetaTrimestre = (nombre: string): string => {
@@ -64,7 +73,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
 
   const handleDescargarAsociacion = (f: Ficha | null, trimestre: string = '') => {
     if (!f) {
-      alert('Por favor registre o seleccione una ficha primero.');
+      alert('Selecciona primero una ficha en la parte superior.');
       return;
     }
 
@@ -88,7 +97,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
 
   const handleDescargarEventos = (f: Ficha | null, trimestre: string) => {
     if (!f) {
-      alert('Por favor registre o seleccione una ficha primero.');
+      alert('Selecciona primero una ficha en la parte superior.');
       return;
     }
     if (!trimestre) {
@@ -240,12 +249,14 @@ export const DashboardView: React.FC<DashboardProps> = ({
   // =========================================================================
   if (currentUser.rol === 'INSTRUCTOR_LIDER') {
     // Fichas del instructor
-    const fichasInstructor = allFichas.filter(f => 
-      f.instructorLiderId === currentUser.id || 
-      f.id === currentUser.fichaAsignadaId || 
-      f.instructorLiderEmail === currentUser.correo
-    );
-    const fichaLider = fichasInstructor.length > 0 ? fichasInstructor[0] : ficha;
+    // `allFichas` ya llega filtrada por la regla única de permisos (lib/permisos,
+    // aplicada en App): el líder solo recibe las fichas a las que está asociado.
+    const fichasInstructor = allFichas;
+
+    // Un líder puede tener varias fichas: se usa la seleccionada en la parte
+    // superior (si es una de las suyas); si no, la primera.
+    const fichaLider = (ficha && fichasInstructor.find(f => f.id === ficha.id))
+      || (fichasInstructor.length > 0 ? fichasInstructor[0] : ficha);
 
     if (!fichaLider) {
       return (
@@ -538,17 +549,12 @@ export const DashboardView: React.FC<DashboardProps> = ({
         {/* Acciones de Coordinador */}
         <div className="flex flex-wrap items-center gap-2.5">
           <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-xl px-1.5 py-1 shadow-xs">
-            <select
-              value={fichaCoord}
-              onChange={e => { setFichaCoord(e.target.value); setTrimestreCoord(''); }}
-              className="text-xs font-bold text-slate-600 bg-transparent px-1.5 py-1 focus:outline-hidden max-w-32"
-              title="Ficha a exportar"
+            <span
+              className="text-xs font-bold text-slate-500 px-2 py-1 whitespace-nowrap"
+              title={fichaCoord ? `Ficha seleccionada en la parte superior: ${fichaCoord.numero_ficha}` : 'Selecciona una ficha en la parte superior'}
             >
-              <option value="">Ficha...</option>
-              {allFichas.map(f => (
-                <option key={f.id} value={f.id}>{f.numero_ficha}</option>
-              ))}
-            </select>
+              {fichaCoord ? `Ficha ${fichaCoord.numero_ficha}` : 'Sin ficha'}
+            </span>
             <select
               value={asociacionTrimestreCoord}
               onChange={e => setAsociacionTrimestreCoord(e.target.value)}
@@ -556,13 +562,13 @@ export const DashboardView: React.FC<DashboardProps> = ({
               title="Alcance del Formato de Asociación de Fichas"
             >
               <option value="">Total</option>
-              {obtenerTrimestresDisponibles(horarios.filter(h => h.fichaId === fichaCoord)).map(t => (
+              {obtenerTrimestresDisponibles(horarios.filter(h => h.fichaId === fichaCoord?.id)).map(t => (
                 <option key={t} value={t}>{etiquetaTrimestre(t)}</option>
               ))}
             </select>
             <button
               id="btn-dash-asociacion-coord"
-              onClick={() => handleDescargarAsociacion(allFichas.find(f => f.id === fichaCoord) || null, asociacionTrimestreCoord)}
+              onClick={() => handleDescargarAsociacion(fichaCoord, asociacionTrimestreCoord)}
               className="flex items-center space-x-2 bg-white hover:bg-slate-50 px-2.5 py-1.5 rounded-lg text-xs font-bold text-[#111C2D] transition-colors"
               title="Descargar el Formato oficial de Asociación de Fichas — Total o por trimestre"
             >
@@ -579,13 +585,13 @@ export const DashboardView: React.FC<DashboardProps> = ({
               title="Trimestre a exportar en el Reporte de Eventos"
             >
               <option value="">Trimestre...</option>
-              {obtenerTrimestresDisponibles(horarios.filter(h => h.fichaId === fichaCoord)).map(t => (
+              {obtenerTrimestresDisponibles(horarios.filter(h => h.fichaId === fichaCoord?.id)).map(t => (
                 <option key={t} value={t}>{etiquetaTrimestre(t)}</option>
               ))}
             </select>
             <button
               id="btn-dash-f001-coord"
-              onClick={() => handleDescargarEventos(allFichas.find(f => f.id === fichaCoord) || null, trimestreCoord)}
+              onClick={() => handleDescargarEventos(fichaCoord, trimestreCoord)}
               className="flex items-center space-x-2 bg-white hover:bg-slate-50 px-2.5 py-1.5 rounded-lg text-xs font-bold text-[#111C2D] transition-colors"
               title="Descargar el Formato oficial de Reporte de Eventos"
             >

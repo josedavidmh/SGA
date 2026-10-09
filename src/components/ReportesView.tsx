@@ -40,6 +40,15 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
     return props.todasLasFichas.filter(f => programas.has(f.programaCodigo || f.programaNombre));
   }, [props.currentUser.rol, props.allFichas, props.todasLasFichas]);
 
+  // Un Instructor Líder solo accede a sus fichas en los reportes: sus bloques de
+  // horario se limitan a esas fichas. Las excepciones son "Mis Horas" (sus horas
+  // en cualquier ficha) y los totales por programa de Retención y Deserción.
+  const horariosReportes = React.useMemo(() => {
+    if (props.currentUser.rol !== 'INSTRUCTOR_LIDER') return props.horarios;
+    const propias = new Set(props.allFichas.map(f => f.id));
+    return props.horarios.filter(h => propias.has(h.fichaId));
+  }, [props.currentUser.rol, props.horarios, props.allFichas]);
+
   const [subTab, setSubTab] = React.useState<SubTabReportes>(props.currentUser.rol === 'INSTRUCTOR_LIDER' ? 'MIS_HORAS' : 'PROGRAMACION');
 
   return (
@@ -121,14 +130,14 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
       </div>
 
       {subTab === 'PROGRAMACION' && (
-        <ReporteProgramacionTrimestre horarios={props.horarios} allFichas={props.allFichas} />
+        <ReporteProgramacionTrimestre horarios={horariosReportes} allFichas={props.allFichas} />
       )}
 
       {subTab === 'INSTRUCTOR' && (
         <ReportesInstructoresView
           currentUser={props.currentUser}
           instructores={props.instructores}
-          horarios={props.horarios}
+          horarios={horariosReportes}
           allFichas={props.allFichas}
           centro={props.centro}
         />
@@ -145,7 +154,7 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
       )}
 
       {subTab === 'HORAS' && (
-        <ReporteHorasInstructor horarios={props.horarios} allFichas={props.allFichas} instructores={props.instructores} centro={props.centro} />
+        <ReporteHorasInstructor horarios={horariosReportes} allFichas={props.allFichas} instructores={props.instructores} centro={props.centro} />
       )}
 
       {subTab === 'CIERRES' && (
@@ -156,7 +165,7 @@ export const ReportesView: React.FC<ReportesViewProps> = (props) => {
       )}
 
       {subTab === 'AMBIENTES' && (
-        <ReporteAmbientesConFichas horarios={props.horarios} allFichas={props.allFichas} ambientes={props.ambientes || []} centro={props.centro} />
+        <ReporteAmbientesConFichas horarios={horariosReportes} allFichas={props.allFichas} ambientes={props.ambientes || []} centro={props.centro} />
       )}
     </div>
   );
