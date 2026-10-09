@@ -1,5 +1,7 @@
 import React from 'react';
 import { CalendarRange, FileSpreadsheet, FileText } from 'lucide-react';
+import { CompetenciaSearchSelect } from './CompetenciaSearchSelect';
+import { fechaISOLocal } from '../lib/festivosColombia';
 import { BloqueHorario, Ficha } from '../types';
 import { obtenerTrimestresDisponibles } from '../services/ambientesReporteService';
 import {
@@ -16,7 +18,8 @@ interface Props {
 /**
  * Consolidado de programación de instructores por trimestre y programa:
  * por cada ficha, los días en el encabezado, una fila por franja y en cada
- * celda el instructor (con su color) y debajo la competencia y sus RAPs.
+ * celda el instructor VIGENTE en la fecha de corte (con su color), debajo la
+ * competencia y sus RAPs y, si va a cambiar, el instructor que sigue con su fecha.
  */
 export const ReporteProgramacionTrimestre: React.FC<Props> = ({ horarios, allFichas }) => {
   const trimestres = React.useMemo(() => obtenerTrimestresDisponibles(horarios), [horarios]);
@@ -32,10 +35,24 @@ export const ReporteProgramacionTrimestre: React.FC<Props> = ({ horarios, allFic
   }, [allFichas]);
   const [programa, setPrograma] = React.useState<string>('TODOS');
   const [soloConBloques, setSoloConBloques] = React.useState(true);
+  // Filtro por ficha ('' = todas) y fecha de corte (por defecto hoy) para ver quién está vigente.
+  const [numeroFicha, setNumeroFicha] = React.useState('');
+  const [fechaCorte, setFechaCorte] = React.useState(() => fechaISOLocal(new Date()));
+  const opcionesFicha = React.useMemo(
+    () => allFichas
+      .filter(f => programa === 'TODOS' || f.programaCodigo === programa)
+      .sort((a, b) => a.numero_ficha.localeCompare(b.numero_ficha))
+      .map(f => ({ codigo: f.numero_ficha, denominacion: f.programaNombre || f.programaCodigo || '' })),
+    [allFichas, programa]
+  );
+  // Si el programa elegido ya no incluye la ficha filtrada, se limpia el filtro.
+  React.useEffect(() => {
+    if (numeroFicha && !opcionesFicha.some(o => o.codigo === numeroFicha)) setNumeroFicha('');
+  }, [opcionesFicha, numeroFicha]);
 
   const datos = React.useMemo(
-    () => construirProgramacionConsolidada(allFichas, horarios, trimestre, programa),
-    [allFichas, horarios, trimestre, programa]
+    () => construirProgramacionConsolidada(allFichas, horarios, trimestre, programa, numeroFicha, fechaCorte || fechaISOLocal(new Date())),
+    [allFichas, horarios, trimestre, programa, numeroFicha, fechaCorte]
   );
   const fichasMostradas = soloConBloques ? datos.fichas.filter(f => f.filas.length > 0) : datos.fichas;
   const [generando, setGenerando] = React.useState(false);
@@ -69,6 +86,25 @@ export const ReporteProgramacionTrimestre: React.FC<Props> = ({ horarios, allFic
             <option value="TODOS">Todos los programas</option>
             {programas.map(([cod, nom]) => <option key={cod} value={cod}>{cod} — {nom}</option>)}
           </select>
+          <div className="w-[260px]">
+            <CompetenciaSearchSelect
+              competencias={opcionesFicha}
+              selectedCodigo={numeroFicha}
+              onChange={setNumeroFicha}
+              placeholder="Todas las fichas"
+              opcionTodas="Todas las fichas"
+              placeholderBusqueda="Buscar ficha o programa..."
+            />
+          </div>
+          <label className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-[11px] font-bold text-slate-600" title="Instructor vigente en esta fecha; el que entra después aparece debajo">
+            Vigente al
+            <input
+              type="date"
+              value={fechaCorte}
+              onChange={(e) => setFechaCorte(e.target.value)}
+              className="text-xs font-bold text-slate-700 outline-none bg-transparent"
+            />
+          </label>
           <button
             type="button"
             disabled={!trimestre || generando}
@@ -162,10 +198,19 @@ export const ReporteProgramacionTrimestre: React.FC<Props> = ({ horarios, allFic
                           return (
                             <td key={d} className="p-0 align-middle border border-slate-300" style={{ backgroundColor: lista[0].color.fondo }}>
                               {lista.map((c, i) => (
-                                <div key={i} className={`p-2 text-center ${i > 0 ? 'border-t border-dashed border-slate-400' : ''}`} style={{ backgroundColor: c.color.fondo }}>
+                                <div key={i} className={`p-2 text-center overflow-hidden break-words ${i > 0 ? 'border-t border-dashed border-slate-400' : ''}`} style={{ backgroundColor: c.color.fondo }}>
                                   <div className="font-black text-[11px] leading-tight" style={{ color: c.color.texto }}>{c.instructor}</div>
                                   <div className="text-[10px] text-slate-700 leading-tight mt-0.5">{c.competencia}</div>
                                   <div className="text-[10px] italic text-slate-600 leading-tight mt-0.5">{c.raps}</div>
+                                  {c.proximo && (
+                                    <div
+                                      className="mt-1 mx-auto max-w-full overflow-hidden rounded-md bg-white/70 border border-sky-200 px-1.5 py-0.5 text-[9px] font-bold text-sky-800 leading-tight"
+                                      title={`Sigue: ${c.proximo.nombre} desde ${c.proximo.desde}`}
+                                    >
+                                      <div className="truncate">→ {c.proximo.nombre}</div>
+                                      <div className="font-semibold text-sky-700">desde {c.proximo.desde}</div>
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </td>

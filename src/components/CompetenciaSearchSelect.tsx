@@ -23,10 +23,14 @@ export interface CompetenciaSearchSelectProps {
   onChange: (codigo: string) => void;
   /** Texto cuando no hay competencia seleccionada. */
   placeholder?: string;
+  /** Si se indica, la lista empieza con esta opción ("Todas…") que limpia la selección (código vacío). */
+  opcionTodas?: string;
+  /** Texto del buscador interno. */
+  placeholderBusqueda?: string;
 }
 
 export const CompetenciaSearchSelect: React.FC<CompetenciaSearchSelectProps> = ({
-  competencias, selectedCodigo, onChange, placeholder = 'Selecciona una competencia...'
+  competencias, selectedCodigo, onChange, placeholder = 'Selecciona una competencia...', opcionTodas, placeholderBusqueda = 'Buscar por código, tipo o nombre...'
 }) => {
   const [abierto, setAbierto] = React.useState(false);
   const [busqueda, setBusqueda] = React.useState('');
@@ -102,11 +106,20 @@ export const CompetenciaSearchSelect: React.FC<CompetenciaSearchSelectProps> = (
           type="text"
           value={busqueda}
           onChange={e => setBusqueda(e.target.value)}
-          placeholder="Buscar por código, tipo o nombre..."
+          placeholder={placeholderBusqueda}
           className="w-full pl-6 pr-2 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D631B]"
         />
       </div>
       <div className="max-h-56 overflow-y-auto">
+        {opcionTodas && (
+          <button
+            type="button"
+            onClick={() => { onChange(''); cerrar(); }}
+            className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-[#E8F5E9] ${selectedCodigo === '' ? 'bg-[#E8F5E9] font-bold text-[#0D631B]' : 'text-slate-500'}`}
+          >
+            {opcionTodas}
+          </button>
+        )}
         {filtradas.length === 0 ? (
           <div className="px-2 py-2 text-[11px] text-slate-400 text-center">Sin resultados</div>
         ) : (

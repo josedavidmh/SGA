@@ -367,15 +367,18 @@ export async function generarFormatoEventos(
     const [h, m] = hora.split(':');
     return (Number(h) || 0) * 60 + (Number(m) || 0);
   };
-  // Orden: día de la semana y, dentro del día, hora de inicio (así los bloques
-  // consecutivos de una misma jornada quedan uno al lado del otro).
+  // Orden: día de la semana, luego el rango de fechas (así los instructores de un
+  // mismo espacio que se relevan a mitad de trimestre no se intercalan) y, por último,
+  // la hora de inicio: los bloques consecutivos de una misma jornada y un mismo
+  // instructor quedan uno al lado del otro y se unen en un solo evento.
   // Un espacio con cambio de instructor a mitad de trimestre se reporta como un
   // evento por instructor, cada uno con sus propias fechas y horas.
   const bloquesOrdenados = expandirTramosInstructor(bloquesTrimestre).sort((a, b) => {
     const orden = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
     return orden.indexOf(a.diaSemana) - orden.indexOf(b.diaSemana)
-      || minutosDe(partirFranja(a.franja)[0]) - minutosDe(partirFranja(b.franja)[0])
-      || String(a.fechaCorteInicio).localeCompare(String(b.fechaCorteInicio));
+      || String(a.fechaCorteInicio).localeCompare(String(b.fechaCorteInicio))
+      || String(a.fechaCorteFin).localeCompare(String(b.fechaCorteFin))
+      || minutosDe(partirFranja(a.franja)[0]) - minutosDe(partirFranja(b.franja)[0]);
   });
 
   const detalleHoras: DetalleHorasEvento[] = [];

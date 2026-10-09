@@ -4,6 +4,8 @@ import autoTable from 'jspdf-autotable';
 import { BloqueHorario, DiaSemana, Ficha, FranjaHorario } from '../types';
 import { claveNombrePersona } from '../lib/nombresInstructor';
 import { esBloqueVacante } from '../lib/bloques';
+import { aplicarVigencia, fechaCorta, lineaTiempoInstructores } from '../lib/tramosInstructor';
+import { fechaISOLocal } from '../lib/festivosColombia';
 
 /**
  * REPORTE CONSOLIDADO: PROGRAMACIÓN DE INSTRUCTORES POR TRIMESTRE Y PROGRAMA
@@ -53,6 +55,8 @@ export interface CeldaProgramacion {
   competencia: string;
   /** "RAP-02, RAP-03" o "Competencia completa" */
   raps: string;
+  /** Si el instructor va a cambiar después de la fecha de corte: quién entra y desde cuándo. */
+  proximo?: { nombre: string; desde: string };
 }
 
 export interface FilaFranja {
@@ -79,6 +83,8 @@ export interface InstructorLeyenda {
 export interface ProgramacionConsolidada {
   trimestre: string;
   programaNombre: string;
+  /** Fecha (YYYY-MM-DD) con la que se determinó el instructor vigente de cada espacio. */
+  fechaCorte: string;
   dias: DiaSemana[];
   fichas: FichaProgramada[];
   instructores: InstructorLeyenda[];
@@ -91,20 +97,34 @@ export function construirProgramacionConsolidada(
   fichas: Ficha[],
   bloques: BloqueHorario[],
   trimestre: string,
-  programaCodigo: string // 'TODOS' o código del programa
+  programaCodigo: string, // 'TODOS' o código del programa
+  /** Número de ficha para ver solo esa ficha ('' = todas). */
+  numeroFicha: string = '',
+  /** Fecha de corte: en cada espacio se ve el instructor vigente ese día (por defecto hoy). */
+  fechaCorte: string = fechaISOLocal(new Date())
 ): ProgramacionConsolidada {
-  const fichasSel = fichas
-    .filter(f => programaCodigo === 'TODOS' || f.programaCodigo === programaCodigo)
+  const fichasPrograma = fichas.filter(f => programaCodigo === 'TODOS' || f.programaCodigo === programaCodigo);
+  const fichasSel = fichasPrograma
+    .filter(f => !numeroFicha || f.numero_ficha === numeroFicha)
     .sort((a, b) => (a.programaNombre || '').localeCompare(b.programaNombre || '') || a.numero_ficha.localeCompare(b.numero_ficha));
   const idsFichas = new Set(fichasSel.map(f => f.id));
-  const bloquesSel = bloques.filter(b => b.trimestre === trimestre && idsFichas.has(b.fichaId));
+  const idsFichasPrograma = new Set(fichasPrograma.map(f => f.id));
+  const bloquesGuardados = bloques.filter(b => b.trimestre === trimestre && idsFichas.has(b.fichaId));
+  // Los colores salen de todo el programa (no solo de la ficha filtrada) para que cada instructor conserve su color.
+  const bloquesParaColor = bloques.filter(b => b.trimestre === trimestre && idsFichasPrograma.has(b.fichaId));
+  // Lo que se ve en cada espacio es el instructor vigente en la fecha de corte; el que entra
+  // después se muestra debajo con su fecha (`proximoCambio`).
+  const bloquesSel = bloquesGuardados.map(b => aplicarVigencia(b, fechaCorte, b.fechaCorteInicio, b.fechaCorteFin));
 
-  // Colores: un color fijo por instructor (orden alfabético), el mismo en todo el reporte.
+  // Colores: un color fijo por instructor (orden alfabético), el mismo en todo el reporte
+  // (incluye a los instructores que entran después de la fecha de corte).
   const nombres = new Map<string, string>();
-  bloquesSel.forEach(b => {
-    if (esBloqueVacante(b)) return;
-    const k = claveNombrePersona(b.instructorNombre || b.instructorId || '');
-    if (k && !nombres.has(k)) nombres.set(k, b.instructorNombre || 'Instructor');
+  bloquesParaColor.forEach(b => {
+    lineaTiempoInstructores(b, b.fechaCorteInicio, b.fechaCorteFin).forEach(t => {
+      if (!t.instructorId && !t.instructorNombre) return;
+      const k = claveNombrePersona(t.instructorNombre || t.instructorId || '');
+      if (k && !nombres.has(k)) nombres.set(k, t.instructorNombre || 'Instructor');
+    });
   });
   const claves = Array.from(nombres.keys()).sort((a, b) => a.localeCompare(b));
   const colorPorClave = new Map<string, ColorInstructor>();
@@ -133,7 +153,10 @@ export function construirProgramacionConsolidada(
         const celda: CeldaProgramacion = {
           bloque: b, vacante,
           instructor: vacante ? 'VACANTE — por asignar' : (b.instructorNombre || 'Instructor'),
-          color, competencia, raps
+          color, competencia, raps,
+          proximo: b.proximoCambio
+            ? { nombre: b.proximoCambio.vacante ? 'Vacante' : (b.proximoCambio.instructorNombre || 'Instructor'), desde: fechaCorta(b.proximoCambio.desde) }
+            : undefined
         };
         (celdas[b.diaSemana] = celdas[b.diaSemana] || []).push(celda);
         if (vacante) { vacantes += 1; return; }
@@ -155,6 +178,7 @@ export function construirProgramacionConsolidada(
   return {
     trimestre,
     programaNombre,
+    fechaCorte,
     dias,
     fichas: fichasProgramadas,
     instructores: Array.from(leyenda.values()).sort((a, b) => a.nombre.localeCompare(b.nombre)),
@@ -170,7 +194,8 @@ const rgb = (hex: string): [number, number, number] => {
 const nombreArchivo = (p: ProgramacionConsolidada, ext: string) =>
   `Programacion_Instructores_${p.trimestre}_${p.programaNombre.replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40)}.${ext}`;
 
-const textoCelda = (c: CeldaProgramacion) => `${c.instructor}\n${c.competencia}\n${c.raps}`;
+const textoProximo = (c: CeldaProgramacion) => (c.proximo ? `→ ${abreviar(c.proximo.nombre, 28)}\ndesde ${c.proximo.desde}` : '');
+const textoCelda = (c: CeldaProgramacion) => `${c.instructor}\n${c.competencia}\n${c.raps}${c.proximo ? `\n${textoProximo(c)}` : ''}`;
 
 // ---------------------------------------------------------------------------
 // EXCEL
@@ -198,7 +223,7 @@ export async function exportarProgramacionTrimestreExcel(p: ProgramacionConsolid
     r += 1;
   };
   titulo('SISTEMA DE GESTIÓN ACADÉMICA Y CURRICULAR — PROGRAMACIÓN DE INSTRUCTORES', 13, true, VERDE);
-  titulo(`TRIMESTRE: ${p.trimestre}   |   PROGRAMA: ${p.programaNombre}`, 10, true);
+  titulo(`TRIMESTRE: ${p.trimestre}   |   PROGRAMA: ${p.programaNombre}   |   INSTRUCTOR VIGENTE AL: ${fechaCorta(p.fechaCorte)}`, 10, true);
   titulo(`Fichas: ${p.fichas.length} | Instructores: ${p.instructores.length} | Espacios vacantes: ${p.vacantes} | Generado: ${new Date().toLocaleString('es-CO')}`);
   r += 1;
 
@@ -248,11 +273,12 @@ export async function exportarProgramacionTrimestreExcel(p: ProgramacionConsolid
             ...(idx > 0 ? [{ text: '\n— — —\n', font: { size: 8, color: { argb: 'FF64748B' } } }] : []),
             { text: `${c.instructor}\n`, font: { bold: true, size: 10, color: { argb: argb(c.color.texto) } } },
             { text: `${c.competencia}\n`, font: { size: 8, color: { argb: 'FF1E293B' } } },
-            { text: c.raps, font: { size: 8, italic: true, color: { argb: 'FF334155' } } }
+            { text: c.raps, font: { size: 8, italic: true, color: { argb: 'FF334155' } } },
+            ...(c.proximo ? [{ text: `\n${textoProximo(c)}`, font: { size: 8, bold: true, color: { argb: 'FF075985' } } }] : [])
           ])
         };
         cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(principal.color.fondo) } };
-        lineasMax = Math.max(lineasMax, lista.length * 5);
+        lineasMax = Math.max(lineasMax, lista.reduce((a, c) => a + (c.proximo ? 7 : 5), 0));
       });
       ws.getRow(r).height = Math.min(160, 15 * lineasMax);
       r += 1;
@@ -308,7 +334,7 @@ export function exportarProgramacionTrimestrePDF(p: ProgramacionConsolidada) {
   doc.text('Programación de Instructores', 40, 36);
   doc.setTextColor(17, 28, 45);
   doc.setFontSize(10);
-  doc.text(`Trimestre ${p.trimestre}  —  ${p.programaNombre}`, 40, 52);
+  doc.text(`Trimestre ${p.trimestre}  —  ${p.programaNombre}  —  Instructor vigente al ${fechaCorta(p.fechaCorte)}`, 40, 52);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 116, 139);
