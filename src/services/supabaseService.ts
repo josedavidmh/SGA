@@ -1243,7 +1243,9 @@ export async function fetchHorariosFromSupabase(): Promise<BloqueHorario[]> {
       duracionHoras: Number(row.duracion_horas || 0),
       fechaCorteInicio: row.fecha_corte_inicio,
       fechaCorteFin: row.fecha_corte_fin,
-      trimestre: normalizarNombreTrimestre(row.trimestre)
+      trimestre: normalizarNombreTrimestre(row.trimestre),
+      instructorDesde: row.instructor_desde || undefined,
+      tramosAnteriores: Array.isArray(row.tramos_anteriores) && row.tramos_anteriores.length > 0 ? row.tramos_anteriores : undefined
     }));
   } catch (err: any) {
     console.error('Excepción al consultar bloques_horarios en Supabase:', err);
@@ -1273,7 +1275,9 @@ function bloqueASupabasePayload(bloque: BloqueHorario) {
     duracion_horas: Math.max(1, Math.round(Number(bloque.duracionHoras) || 3)),
     trimestre: bloque.trimestre || 'Sin trimestre',
     fecha_corte_inicio: bloque.fechaCorteInicio || new Date().toISOString().slice(0, 10),
-    fecha_corte_fin: bloque.fechaCorteFin || bloque.fechaCorteInicio || new Date().toISOString().slice(0, 10)
+    fecha_corte_fin: bloque.fechaCorteFin || bloque.fechaCorteInicio || new Date().toISOString().slice(0, 10),
+    instructor_desde: bloque.instructorDesde || null,
+    tramos_anteriores: bloque.tramosAnteriores && bloque.tramosAnteriores.length > 0 ? bloque.tramosAnteriores : null
   };
 }
 
@@ -1294,26 +1298,51 @@ function explicarErrorBloque(error: { code?: string; message?: string; details?:
   return msg + (error.details ? ` (${error.details})` : '');
 }
 
-/** Upsert de un bloque; si la columna ambiente_especial aún no existe (20260929h), se reintenta sin ella. */
+/**
+ * Upsert de un bloque. Si faltan columnas opcionales de scripts más nuevos
+ * (ambiente_especial: 20260929h; instructor_desde / tramos_anteriores:
+ * 20261009), se reintenta sin ellas para que el resto del bloque sí se guarde.
+ * `columnasFaltantes` avisa cuáles se quedaron sin guardar.
+ */
 async function upsertBloque(bloque: BloqueHorario) {
   const payload: Record<string, any> = bloqueASupabasePayload(bloque);
+  const opcionales = ['ambiente_especial', 'instructor_desde', 'tramos_anteriores'];
+  const columnasFaltantes: string[] = [];
   let res = await supabase.from('bloques_horarios').upsert([payload], { onConflict: 'id' }).select();
-  if (res.error && (res.error.code === 'PGRST204' || /ambiente_especial/.test(res.error.message || ''))) {
-    delete payload.ambiente_especial;
+  for (let intento = 0; intento < opcionales.length && res.error; intento++) {
+    const msg = res.error.message || '';
+    if (res.error.code !== 'PGRST204' && !opcionales.some(c => msg.includes(c))) break;
+    // El mensaje de PostgREST nombra la columna: "Could not find the 'x' column of ..."
+    const nombrada = (msg.match(/'([a-z_]+)' column/) || [])[1] || opcionales.find(c => msg.includes(c));
+    const col = nombrada && opcionales.includes(nombrada) && nombrada in payload ? nombrada : undefined;
+    if (!col) break;
+    delete payload[col];
+    columnasFaltantes.push(col);
     res = await supabase.from('bloques_horarios').upsert([payload], { onConflict: 'id' }).select();
   }
-  return res;
+  return { ...res, columnasFaltantes };
+}
+
+/** Si el bloque trae fechas de cambio de instructor pero la base aún no tiene sus columnas, se avisa (el resto sí se guardó). */
+function avisoColumnasCambioInstructor(bloque: BloqueHorario, faltantes: string[]): string | undefined {
+  const usa = Boolean(bloque.instructorDesde) || Boolean(bloque.tramosAnteriores && bloque.tramosAnteriores.length > 0);
+  if (usa && faltantes.some(c => c === 'instructor_desde' || c === 'tramos_anteriores')) {
+    return 'El instructor sí se guardó, pero las FECHAS del cambio no: la base de datos aún no tiene esas columnas. Corre en Supabase el script 20261009_cambio_instructor_con_fecha.sql y vuelve a registrar el cambio.';
+  }
+  return undefined;
 }
 
 export async function insertHorarioInSupabase(bloque: BloqueHorario): Promise<SyncResult<any>> {
   if (!isSupabaseConfigured) return { success: false, error: 'Supabase no configurado' };
   try {
-    const { data, error } = await upsertBloque(bloque);
+    const { data, error, columnasFaltantes } = await upsertBloque(bloque);
 
     if (error) {
       const isRls = error.code === '42501' || error.message?.toLowerCase().includes('row-level security');
       return { success: false, error: explicarErrorBloque(error), isRlsError: isRls };
     }
+    const aviso = avisoColumnasCambioInstructor(bloque, columnasFaltantes);
+    if (aviso) return { success: false, data, error: aviso };
     return { success: true, data };
   } catch (err: any) {
     return { success: false, error: err.message || 'Error desconocido de red al contactar Supabase.' };
@@ -1325,12 +1354,14 @@ export async function updateHorarioInSupabase(bloque: BloqueHorario): Promise<Sy
   try {
     // upsert en vez de update: si el bloque nunca había llegado a Supabase
     // (por el error de la columna instructor_nombre), se crea ahora.
-    const { data, error } = await upsertBloque(bloque);
+    const { data, error, columnasFaltantes } = await upsertBloque(bloque);
 
     if (error) {
       const isRls = error.code === '42501' || error.message?.toLowerCase().includes('row-level security');
       return { success: false, error: explicarErrorBloque(error), isRlsError: isRls };
     }
+    const aviso = avisoColumnasCambioInstructor(bloque, columnasFaltantes);
+    if (aviso) return { success: false, data, error: aviso };
     return { success: true, data };
   } catch (err: any) {
     return { success: false, error: err.message || 'Error desconocido de red al contactar Supabase.' };

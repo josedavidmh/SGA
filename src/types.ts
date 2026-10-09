@@ -366,7 +366,7 @@ export interface BloqueHorario {
   rapTitulo: string;
   competenciaCodigo: string;
   competenciaNombre?: string;
-  rapsAsignados?: { codigo: string; denominacion: string; horas?: number }[];
+  rapsAsignados?: RapAsignadoBloque[];
   esCompetenciaCompleta?: boolean;
   duracionHoras: number;
   fechaCorteInicio: string;
@@ -375,6 +375,54 @@ export interface BloqueHorario {
   advertenciaPerfil?: AdvertenciaPerfilBloque;
   /** Ambiente solo para este bloque (excepción por franja). Vacío = el del día o el base de la ficha. */
   ambienteEspecial?: string;
+  /**
+   * Fecha (YYYY-MM-DD) desde la que rige el instructor ACTUAL de este espacio
+   * (o la vacancia actual). Vacío = desde el inicio del trimestre.
+   */
+  instructorDesde?: string;
+  /** Instructores (o períodos vacantes) anteriores en este mismo espacio y trimestre, con sus fechas. */
+  tramosAnteriores?: TramoInstructorBloque[];
+  /**
+   * SOLO PARA MOSTRAR (se calcula, no se guarda): cuando el instructor que se ve hoy
+   * en el horario va a cambiar en una fecha futura, indica quién entra y desde cuándo.
+   */
+  proximoCambio?: { instructorNombre?: string; vacante: boolean; desde: string };
+}
+
+/**
+ * Un RAP asignado a un bloque. Sin `competenciaCodigo`, pertenece a la competencia
+ * del bloque. Cuando un instructor recibe RAPs de VARIAS competencias en el mismo
+ * espacio (p. ej. un reemplazo), todos llevan su `competenciaCodigo`.
+ */
+export interface RapAsignadoBloque {
+  codigo: string;
+  denominacion: string;
+  horas?: number;
+  competenciaCodigo?: string;
+  competenciaNombre?: string;
+}
+
+/** RAPs / competencia que cubre un bloque (o un tramo de instructor dentro del bloque). */
+export interface ContenidoRapsBloque {
+  rapCodigo: string;
+  rapTitulo: string;
+  rapsAsignados?: RapAsignadoBloque[];
+  esCompetenciaCompleta?: boolean;
+  /** Competencia principal (solo cuando cambia respecto a la del bloque). */
+  competenciaCodigo?: string;
+  competenciaNombre?: string;
+}
+
+/** Un instructor (o período vacante) que ya pasó por un bloque, con su rango de fechas (ambas incluidas). */
+export interface TramoInstructorBloque {
+  instructorId?: string;
+  instructorNombre?: string;
+  /** RAPs que cubría en ese tramo (el nuevo instructor puede heredar los mismos o recibir otros). */
+  raps?: ContenidoRapsBloque;
+  /** Primer día (YYYY-MM-DD) en que cubrió el espacio. */
+  desde: string;
+  /** Último día (YYYY-MM-DD) en que lo cubrió. */
+  hasta: string;
 }
 
 export interface ConflictoHorario {

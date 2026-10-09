@@ -40,6 +40,7 @@ import {
   Ficha,
   Instructor,
   BloqueHorario,
+  ContenidoRapsBloque,
   DiaSemana,
   FranjaHorario,
   User,
@@ -53,6 +54,10 @@ import {
   RegionalCentro
 } from '../types';
 import { fechasDeCorteTrimestre, trimestreDeFecha, normalizarNombreTrimestre } from '../lib/calendarioTrimestres';
+import { PanelCambioInstructor } from './PanelCambioInstructor';
+import { CompetenciaSearchSelect } from './CompetenciaSearchSelect';
+import { construirContenidoRaps, paresRapDeBloque, fechaCorta, inicioTramoActual, sumarDiasISO, aplicarVigencia, lineaTiempoInstructores } from '../lib/tramosInstructor';
+import { fechaISOLocal } from '../lib/festivosColombia';
 import { ambienteDelDia, ambienteEfectivo, buscarChoqueAmbiente, excepcionDelDia, origenAmbiente } from '../lib/ambientes';
 import { calcularComparativoCompetencias } from '../services/horasEjecutadasService';
 import { dialogo } from './DialogoSistema';
@@ -76,8 +81,10 @@ interface HorariosProps {
   rapsSeguimiento?: RapSeguimiento[];
   onGuardarBloque: (bloque: Omit<BloqueHorario, 'id'>) => void;
   onEliminarBloque: (bloqueId: string) => void;
-  onQuitarInstructorDeBloque?: (bloqueId: string) => void;
-  onAsignarInstructorABloque?: (bloqueId: string, instructor: Instructor) => void;
+  /** `desde` (YYYY-MM-DD): último día del instructor = el día anterior. Sin fecha, sale de todo el período. */
+  onQuitarInstructorDeBloque?: (bloqueId: string, desde?: string) => void;
+  /** `desde` (YYYY-MM-DD): fecha de entrada del nuevo instructor. Sin fecha, cubre todo el período. */
+  onAsignarInstructorABloque?: (bloqueId: string, instructor: Instructor, desde?: string, nuevosRaps?: ContenidoRapsBloque) => void;
   /** Horas por competencia cargadas desde SofiaPlus (para avisar si una competencia ya pasó del 100%). */
   registrosHorasEjecutadas?: RegistroHorasEjecutadas[];
   actividades?: ActividadSeguimiento[];
@@ -159,6 +166,9 @@ export const FRANJAS: { franja: FranjaHorario; label: string; sub: string }[] = 
 // during the previous render": por eso elegir una ficha desde esa pantalla
 // no llevaba al horario. Con una key distinta para cada caso, React monta
 // una instancia nueva y el número de hooks siempre es consistente.
+/** Porcentaje de las horas directas de un RAP a partir del cual ya no admite más bloques. */
+const TOPE_PROGRAMACION_RAP = 80;
+
 export const HorariosView: React.FC<HorariosProps> = (props) => (
   <HorariosViewInterno key={props.ficha ? 'con-ficha' : 'sin-ficha'} {...props} />
 );
@@ -211,6 +221,9 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   const [bloqueDetalleModal, setBloqueDetalleModal] = React.useState<BloqueHorario | null>(null);
   // Instructor elegido en el modal de detalle para cubrir un bloque vacante.
   const [instructorParaVacante, setInstructorParaVacante] = React.useState<string>('');
+  // Panel "cambiar instructor con fecha" dentro del modal de detalle.
+  const [panelCambio, setPanelCambio] = React.useState<null | 'reemplazar' | 'vacante'>(null);
+  React.useEffect(() => { if (!bloqueDetalleModal) setPanelCambio(null); }, [bloqueDetalleModal]);
 
   // Mover (arrastrar y soltar) y Copiar/Pegar bloques en el lienzo — agiliza
   // el armado del horario sin tener que reconstruir cada bloque desde cero.
@@ -450,7 +463,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   const currentFichaBloques = horarios.filter(h => h.fichaId === ficha.id && h.trimestre === trimestreSeleccionado);
 
   // Tope institucional de programación por RAP: una vez el RAP ya tiene entre
-  // 70% y 100% de sus horas directas programadas en Horarios, no debería
+  // 80% y 100% de sus horas directas programadas en Horarios, no debería
   // seguir recibiendo más bloques (ya está cubierto). Se calcula sumando la
   // duración de todos los bloques existentes que incluyen ese RAP.
   // IMPORTANTE: se exige también competenciaCodigo — el código de RAP (p.ej.
@@ -460,7 +473,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   // MOVER un bloque: sus horas no deben contarse dos veces contra sí mismo).
   const calcularHorasProgramadasRap = (compCodigo: string, rapCodigo: string, excluirBloqueId?: string): number => {
     return currentFichaBloques
-      .filter(h => h.id !== excluirBloqueId && h.competenciaCodigo === compCodigo && h.rapsAsignados?.some(r => r.codigo === rapCodigo))
+      .filter(h => h.id !== excluirBloqueId && h.rapsAsignados?.some(r => r.codigo === rapCodigo && (r.competenciaCodigo || h.competenciaCodigo) === compCodigo))
       .reduce((acc, h) => acc + h.duracionHoras, 0);
   };
 
@@ -471,7 +484,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
   };
 
   // Revisa los RAPs indicados (de UNA competencia) y devuelve el primero que ya
-  // alcanzó el tope (>=70% de sus horas directas ya programadas), si lo hay.
+  // alcanzó el tope (>=80% de sus horas directas ya programadas), si lo hay.
   // Busca en rapsPrograma (todo el programa) en vez de solo la competencia
   // seleccionada en el panel, para que la validación sea correcta también al
   // mover/pegar un bloque de una competencia distinta a la seleccionada ahí.
@@ -483,14 +496,21 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
       if (horasPlaneadas <= 0) continue; // sin dato de horas planeadas, no se puede validar el tope
       const horasProgramadas = calcularHorasProgramadasRap(compCodigo, rapCod, excluirBloqueId);
       const porcentaje = Math.round((horasProgramadas / horasPlaneadas) * 100);
-      if (porcentaje >= 70) {
+      if (porcentaje >= TOPE_PROGRAMACION_RAP) {
         return { rapCodigo: rapCod, horasProgramadas, horasPlaneadas, porcentaje };
       }
     }
     return null;
   };
+  // En la matriz prevalece el instructor VIGENTE hoy: si hay un cambio de instructor
+  // con fecha futura se sigue viendo al actual (con aviso del que entra) y el nuevo
+  // aparece solo cuando llega su fecha.
+  const hoyISO = fechaISOLocal(new Date());
   const bloqueEnCelda = (dia: DiaSemana, franja: FranjaHorario) => {
-    return currentFichaBloques.find(h => h.diaSemana === dia && h.franja === franja);
+    const b = currentFichaBloques.find(h => h.diaSemana === dia && h.franja === franja);
+    if (!b) return b;
+    const corte = fechasDeCorteTrimestre(trimestresCalendario, b.trimestre);
+    return aplicarVigencia(b, hoyISO, corte.inicio, corte.fin);
   };
 
   // Regla Heurística Anti-Cruces (un bloque vacante, sin instructor, nunca
@@ -540,7 +560,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
 
   // Validación compartida por Mover (drag & drop) y Pegar (copiar/pegar) antes
   // de escribir un bloque en una celda destino: cruce de instructor, franja ya
-  // ocupada, RAP calificado bajo modo estricto, y tope institucional 70%-100%.
+  // ocupada, RAP calificado bajo modo estricto, y tope institucional 80%-100%.
   // En 'MOVER' se excluye el aporte del propio bloque al tope (se reubica, no
   // se duplica); en 'PEGAR' se cuenta completo (sí se duplican horas).
   const validarDestinoParaBloque = (bloque: BloqueHorario, dia: DiaSemana, franja: FranjaHorario, modo: 'MOVER' | 'PEGAR'): string | null => {
@@ -565,7 +585,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
 
     const rapEnTope = encontrarRapEnTope(bloque.competenciaCodigo, rapCodigos, modo === 'MOVER' ? bloque.id : undefined);
     if (rapEnTope) {
-      return `No se puede ${modo === 'MOVER' ? 'mover' : 'pegar'} este bloque: ${rapEnTope.rapCodigo} ya tiene ${rapEnTope.horasProgramadas}h de ${rapEnTope.horasPlaneadas}h planeadas (${rapEnTope.porcentaje}%), dentro del rango institucional de cumplimiento (70%-100%).`;
+      return `No se puede ${modo === 'MOVER' ? 'mover' : 'pegar'} este bloque: ${rapEnTope.rapCodigo} ya tiene ${rapEnTope.horasProgramadas}h de ${rapEnTope.horasPlaneadas}h planeadas (${rapEnTope.porcentaje}%), dentro del rango institucional de cumplimiento (80%-100%).`;
     }
 
     const ambienteDestino = bloque.ambienteEspecial || ambienteDelDia(ficha, trimestreSeleccionado, dia);
@@ -611,7 +631,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
     if (bloqueCopiado.instructorId) {
       await avisarSiCompetenciaSobrepasada(bloqueCopiado.competenciaCodigo, bloqueCopiado.instructorNombre);
     }
-    const { id: _id, ...datosBloque } = bloqueCopiado;
+    const { id: _id, tramosAnteriores: _tramos, instructorDesde: _desde, proximoCambio: _prox, ...datosBloque } = bloqueCopiado;
     onGuardarBloque({ ...datosBloque, diaSemana: dia, franja, ambiente: bloqueCopiado.ambienteEspecial || ambienteDelDia(ficha, trimestreSeleccionado, dia) });
     mostrarToast(`Bloque pegado en ${dia} • ${franja}`);
   };
@@ -815,7 +835,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
       alert(
         `No se puede programar más horas para ${rapEnTope.rapCodigo}.\n\n` +
         `Ya tiene ${rapEnTope.horasProgramadas}h programadas de ${rapEnTope.horasPlaneadas}h planeadas ` +
-        `(${rapEnTope.porcentaje}%), dentro del rango institucional de cumplimiento (70%-100%).`
+        `(${rapEnTope.porcentaje}%), dentro del rango institucional de cumplimiento (80%-100%).`
       );
       return;
     }
@@ -886,7 +906,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
     }
 
     // Tope institucional: si alguno de los RAPs seleccionados ya tiene entre
-    // 70% y 100% de sus horas directas programadas en Horarios, se bloquea el
+    // 80% y 100% de sus horas directas programadas en Horarios, se bloquea el
     // nuevo bloque — ya está dentro del rango de cumplimiento y programarlo
     // de más no aporta (y desincroniza el semáforo de Seguimiento).
     // Modo estricto: ningún RAP ya calificado debería recibir más programación.
@@ -907,7 +927,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
       alert(
         `No se puede programar más horas para ${rapEnTope.rapCodigo}.\n\n` +
         `Ya tiene ${rapEnTope.horasProgramadas}h programadas de ${rapEnTope.horasPlaneadas}h planeadas ` +
-        `(${rapEnTope.porcentaje}%), dentro del rango institucional de cumplimiento (70%-100%).\n\n` +
+        `(${rapEnTope.porcentaje}%), dentro del rango institucional de cumplimiento (80%-100%).\n\n` +
         `Este RAP no requiere más programación en Horarios. Si de verdad necesita más horas, ` +
         `revíselo primero en el módulo de Seguimiento.`
       );
@@ -1363,8 +1383,12 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                                 {bloque.rapsAsignados && bloque.rapsAsignados.length > 0 && (
                                   <div className="flex flex-wrap gap-1 mt-1">
                                     {bloque.rapsAsignados.slice(0, 3).map((r, i) => (
-                                      <span key={i} className="text-[9px] px-1 py-0.2 rounded bg-white text-emerald-900 border border-emerald-200 font-mono font-bold">
-                                        {r.codigo}
+                                      <span
+                                        key={i}
+                                        className={`text-[9px] px-1 py-0.2 rounded bg-white border font-mono font-bold ${r.competenciaCodigo && r.competenciaCodigo !== bloque.competenciaCodigo ? 'text-violet-800 border-violet-300' : 'text-emerald-900 border-emerald-200'}`}
+                                        title={r.competenciaCodigo && r.competenciaCodigo !== bloque.competenciaCodigo ? `Competencia ${r.competenciaCodigo}${r.competenciaNombre ? ` — ${r.competenciaNombre}` : ''}` : undefined}
+                                      >
+                                        {r.competenciaCodigo && r.competenciaCodigo !== bloque.competenciaCodigo ? `${r.competenciaCodigo}·` : ''}{r.codigo}
                                       </span>
                                     ))}
                                     {bloque.rapsAsignados.length > 3 && (
@@ -1381,13 +1405,25 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                                   </div>
                                 )}
                                 {bloque.instructorId ? (
-                                  <div className="text-[11px] text-slate-700 font-semibold mt-1 truncate">
-                                    {bloque.instructorNombre}
+                                  <div className="mt-1">
+                                    <div className="text-[11px] text-slate-700 font-semibold truncate">
+                                      {bloque.instructorNombre}
+                                    </div>
+                                    {bloque.instructorDesde && (
+                                      <div className="text-[9px] font-bold text-sky-700 truncate" title="Reemplazó al instructor anterior a mitad del trimestre">
+                                        ↻ desde {fechaCorta(bloque.instructorDesde)}
+                                      </div>
+                                    )}
+                                    {bloque.proximoCambio && (
+                                      <div className="text-[9px] font-bold text-sky-700 truncate" title="Cambio de instructor programado">
+                                        → {bloque.proximoCambio.vacante ? 'vacante' : bloque.proximoCambio.instructorNombre} desde {fechaCorta(bloque.proximoCambio.desde)}
+                                      </div>
+                                    )}
                                   </div>
                                 ) : (
                                   <div className="text-[10px] text-amber-800 font-black mt-1 truncate flex items-center space-x-1">
                                     <AlertOctagon className="w-3 h-3 shrink-0" />
-                                    <span>VACANTE — falta instructor</span>
+                                    <span>VACANTE{bloque.instructorDesde ? ` desde ${fechaCorta(bloque.instructorDesde)}` : ' — falta instructor'}</span>
                                   </div>
                                 )}
 
@@ -1423,14 +1459,13 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                                     )}
                                     {bloque.instructorId && onQuitarInstructorDeBloque && (
                                       <button
-                                        onClick={async (e) => {
+                                        onClick={(e) => {
                                           e.stopPropagation();
-                                          if (await confirmarDejarVacante(bloque.instructorNombre)) {
-                                            onQuitarInstructorDeBloque(bloque.id);
-                                          }
+                                          setPanelCambio('reemplazar');
+                                          setBloqueDetalleModal(bloque);
                                         }}
                                         className="text-slate-400 hover:text-amber-600 p-0.5 rounded hover:bg-white transition-colors"
-                                        title="Dejar Vacante (el instructor ya no continúa)"
+                                        title="Reemplazar instructor o dejar vacante (con fecha)"
                                       >
                                         <UserX className="w-3.5 h-3.5" />
                                       </button>
@@ -1653,9 +1688,9 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
               {rapsDeCompetenciaActual.map((rap) => {
                 const isChecked = selectedRapCodigos.includes(rap.codigoRap);
                 // Aviso temprano (antes de intentar asignar) de que este RAP ya
-                // está dentro o cerca del tope de cumplimiento 70%-100%.
+                // está dentro o cerca del tope de cumplimiento 80%-100%.
                 const porcentajeProgramado = calcularPorcentajeProgramadoRap(selectedCompetenciaCodigo, rap);
-                const enTope = porcentajeProgramado >= 70;
+                const enTope = porcentajeProgramado >= TOPE_PROGRAMACION_RAP;
                 const estadoRap = getEstadoRap(selectedCompetenciaCodigo, rap.codigoRap);
                 const esCalificado = estadoRap === 'CALIFICADO';
                 // En modo estricto, un RAP ya calificado no se puede ni marcar:
@@ -1700,7 +1735,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                           {!esCalificado && enTope && (
                             <span
                               className="text-[10px] font-black px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300"
-                              title="Este RAP ya tiene entre 70% y 100% de sus horas directas programadas en Horarios — no admite más bloques."
+                              title="Este RAP ya tiene entre 80% y 100% de sus horas directas programadas en Horarios — no admite más bloques."
                             >
                               {porcentajeProgramado}% programado
                             </span>
@@ -1905,7 +1940,7 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
       {/* Modal de Detalle de Bloque Asignado */}
       {bloqueDetalleModal && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[92vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <div className="flex items-center space-x-2">
@@ -1951,6 +1986,11 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                         </span>
                         <span className="text-slate-700 leading-snug">
                           {r.denominacion}
+                          {r.competenciaCodigo && r.competenciaCodigo !== bloqueDetalleModal.competenciaCodigo && (
+                            <span className="block text-[10px] font-semibold text-violet-700 mt-0.5">
+                              Otra competencia: [{r.competenciaCodigo}] {r.competenciaNombre}
+                            </span>
+                          )}
                         </span>
                       </div>
                     ))
@@ -1966,11 +2006,21 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                 <div>
                   <span className="text-[10px] font-bold text-slate-400 block uppercase">Instructor</span>
                   {bloqueDetalleModal.instructorId ? (
-                    <div className="font-bold text-[#111C2D] mt-0.5">{bloqueDetalleModal.instructorNombre}</div>
+                    <div className="font-bold text-[#111C2D] mt-0.5">
+                      {bloqueDetalleModal.instructorNombre}
+                      {bloqueDetalleModal.instructorDesde && (
+                        <span className="block text-[10px] font-semibold text-sky-700">desde el {fechaCorta(bloqueDetalleModal.instructorDesde)}</span>
+                      )}
+                      {bloqueDetalleModal.proximoCambio && (
+                        <span className="block text-[10px] font-semibold text-sky-700">
+                          → {bloqueDetalleModal.proximoCambio.vacante ? 'Vacante' : bloqueDetalleModal.proximoCambio.instructorNombre} desde el {fechaCorta(bloqueDetalleModal.proximoCambio.desde)}
+                        </span>
+                      )}
+                    </div>
                   ) : (
                     <div className="font-black text-amber-700 mt-0.5 flex items-center space-x-1">
                       <AlertOctagon className="w-3.5 h-3.5" />
-                      <span>VACANTE</span>
+                      <span>VACANTE{bloqueDetalleModal.instructorDesde ? ` desde el ${fechaCorta(bloqueDetalleModal.instructorDesde)}` : ''}</span>
                     </div>
                   )}
                 </div>
@@ -2016,41 +2066,115 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                 </div>
               </div>
 
-              {/* Cubrir un espacio vacante: elegir instructor sin tener que
-                  reconstruir el bloque (RAP/día/franja ya quedan reservados). */}
-              {!bloqueDetalleModal.instructorId && canEditHorarios && onAsignarInstructorABloque && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
-                  <span className="text-[10px] font-bold text-amber-800 uppercase block">
-                    Asignar instructor a este espacio vacante
-                  </span>
-                  <InstructorVacanteSearchSelect
+              {/* Línea de tiempo interna de instructores de este espacio, con sus fechas
+                  (el horario muestra solo al vigente hoy; aquí está la secuencia completa). */}
+              {(() => {
+                const guardado = horarios.find(b => b.id === bloqueDetalleModal.id) || bloqueDetalleModal;
+                if (!guardado.tramosAnteriores || guardado.tramosAnteriores.length === 0) return null;
+                const corte = fechasDeCorteTrimestre(trimestresCalendario, guardado.trimestre);
+                const linea = lineaTiempoInstructores(guardado, corte.inicio, corte.fin);
+                return (
+                  <div className="p-3 bg-slate-50 rounded-xl space-y-1.5">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Instructores en este espacio, con sus fechas</span>
+                    {linea.map((t, i) => {
+                      const vigente = t.desde <= hoyISO && hoyISO <= t.hasta;
+                      const futuro = t.desde > hoyISO;
+                      return (
+                        <div key={i} className={`flex items-start justify-between gap-2 text-[11px] rounded-lg px-2 py-1 ${vigente ? 'bg-emerald-50 border border-emerald-200' : futuro ? 'bg-sky-50 border border-sky-200' : ''}`}>
+                          <span className="min-w-0">
+                            <span className={`font-semibold ${t.instructorId ? 'text-slate-700' : 'text-amber-700'}`}>{t.instructorId ? t.instructorNombre : 'Vacante'}</span>
+                            {vigente && <span className="ml-1 text-[9px] font-black text-emerald-700">VIGENTE HOY</span>}
+                            {futuro && <span className="ml-1 text-[9px] font-black text-sky-700">PROGRAMADO</span>}
+                            {t.instructorId && t.raps && <span className="block text-[10px] text-slate-400 truncate">RAPs: {t.raps.rapCodigo}</span>}
+                          </span>
+                          <span className="text-slate-500 shrink-0">{fechaCorta(t.desde)} → {i === linea.length - 1 ? 'fin del trimestre' : fechaCorta(t.hasta)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* Cambiar el instructor de este espacio indicando desde qué fecha entra el nuevo
+                  (reemplazo a mitad de trimestre) o cubrir un espacio vacante. */}
+              {canEditHorarios && onAsignarInstructorABloque && (() => {
+                const corte = fechasDeCorteTrimestre(trimestresCalendario, bloqueDetalleModal.trimestre);
+                const actual = horarios.find(b => b.id === bloqueDetalleModal.id) || bloqueDetalleModal;
+                const esVacante = !actual.instructorId;
+                if (!esVacante && !panelCambio) {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setPanelCambio('reemplazar')}
+                      className="w-full py-2 rounded-lg bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 font-bold text-xs transition-colors flex items-center justify-center space-x-1.5"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>Reemplazar instructor…</span>
+                    </button>
+                  );
+                }
+                if (!esVacante && !panelCambio) return null;
+                return (
+                  <PanelCambioInstructor
+                    key={`${actual.id}-${panelCambio || 'asignar'}`}
+                    bloque={actual}
+                    inicioCorte={corte.inicio}
+                    finCorte={corte.fin}
                     instructores={instructores}
-                    selectedId={instructorParaVacante}
-                    onChange={setInstructorParaVacante}
-                  />
-                  <button
-                    type="button"
-                    disabled={!instructorParaVacante}
-                    onClick={async () => {
-                      const inst = instructores.find(i => i.id === instructorParaVacante);
-                      if (!inst) return;
-                      const conflicto = checkInstructorConflicto(inst.id, bloqueDetalleModal.diaSemana, bloqueDetalleModal.franja);
-                      if (conflicto.hasConflicto) {
-                        alert(`¡BLOQUEO DE CRUCE PREVENTIVO!\nEl instructor ${inst.nombreCompleto} ya se encuentra asignado el día ${bloqueDetalleModal.diaSemana} en la franja ${bloqueDetalleModal.franja} en la Ficha ${conflicto.fichaNumero} (${conflicto.ambiente}).`);
-                        return;
+                    variante={esVacante ? 'asignar' : 'reemplazar'}
+                    iniciarVacante={panelCambio === 'vacante'}
+                    competenciasPrograma={competenciasPrograma}
+                    rapsPrograma={rapsPrograma}
+                    estadoRap={(comp, cod) => getEstadoRap(comp, cod)}
+                    onCancelar={esVacante ? undefined : () => setPanelCambio(null)}
+                    onConfirmar={async (inst, desde, rapsElegidos) => {
+                      if (!inst) {
+                        // Dejar vacante desde la fecha indicada.
+                        if (!onQuitarInstructorDeBloque) return false;
+                        onQuitarInstructorDeBloque(actual.id, desde);
+                        mostrarToast(`El espacio queda vacante desde el ${fechaCorta(desde)}`);
+                        setBloqueDetalleModal(null);
+                        return true;
                       }
-                      await avisarSiCompetenciaSobrepasada(bloqueDetalleModal.competenciaCodigo, inst.nombreCompleto);
-                      onAsignarInstructorABloque(bloqueDetalleModal.id, inst);
-                      mostrarToast(`${inst.nombreCompleto} ahora cubre este espacio`);
+                      const conflicto = checkInstructorConflicto(inst.id, actual.diaSemana, actual.franja);
+                      if (conflicto.hasConflicto) {
+                        alert(`¡BLOQUEO DE CRUCE PREVENTIVO!\nEl instructor ${inst.nombreCompleto} ya se encuentra asignado el día ${actual.diaSemana} en la franja ${actual.franja} en la Ficha ${conflicto.fichaNumero} (${conflicto.ambiente}).`);
+                        return false;
+                      }
+                      // RAPs distintos a los del saliente (de esta u otras competencias): se respeta el
+                      // tope institucional de horas para los RAPs que se están sumando al espacio.
+                      let contenido: ContenidoRapsBloque | undefined;
+                      if (rapsElegidos) {
+                        const previos = paresRapDeBloque(actual, rapsPrograma);
+                        const nuevosPares = rapsElegidos.filter(p => !previos.some(q => q.competenciaCodigo === p.competenciaCodigo && q.rapCodigo === p.rapCodigo));
+                        const competenciasNuevas = Array.from(new Set(nuevosPares.map(p => p.competenciaCodigo)));
+                        for (const comp of competenciasNuevas) {
+                          const enTope = encontrarRapEnTope(comp, nuevosPares.filter(p => p.competenciaCodigo === comp).map(p => p.rapCodigo), actual.id);
+                          if (enTope) {
+                            alert(
+                              `No se puede asignar ${enTope.rapCodigo}${comp !== actual.competenciaCodigo ? ` (competencia ${comp})` : ''} a este espacio.\n\n` +
+                              `Ya tiene ${enTope.horasProgramadas}h programadas de ${enTope.horasPlaneadas}h planeadas ` +
+                              `(${enTope.porcentaje}%), dentro del rango institucional de cumplimiento (80%-100%).`
+                            );
+                            return false;
+                          }
+                        }
+                        contenido = construirContenidoRaps(actual, competenciasPrograma, rapsPrograma, rapsElegidos);
+                      }
+                      await avisarSiCompetenciaSobrepasada(actual.competenciaCodigo, inst.nombreCompleto);
+                      onAsignarInstructorABloque(actual.id, inst, desde, contenido);
+                      mostrarToast(
+                        desde > inicioTramoActual(actual, corte.inicio)
+                          ? `${inst.nombreCompleto} entra desde el ${fechaCorta(desde)}${actual.instructorId ? ` · ${actual.instructorNombre} queda hasta el ${fechaCorta(sumarDiasISO(desde, -1))}` : ''}`
+                          : `${inst.nombreCompleto} ahora cubre este espacio`
+                      );
                       setInstructorParaVacante('');
                       setBloqueDetalleModal(null);
+                      return true;
                     }}
-                    className="w-full py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-colors disabled:opacity-50"
-                  >
-                    Asignar Instructor
-                  </button>
-                </div>
-              )}
+                  />
+                );
+              })()}
             </div>
 
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
@@ -2058,14 +2182,9 @@ const HorariosViewInterno: React.FC<HorariosProps> = ({
                 <div className="flex items-center space-x-2">
                   {bloqueDetalleModal.instructorId && onQuitarInstructorDeBloque && (
                     <button
-                      onClick={async () => {
-                        if (await confirmarDejarVacante(bloqueDetalleModal.instructorNombre)) {
-                          onQuitarInstructorDeBloque(bloqueDetalleModal.id);
-                          setBloqueDetalleModal(null);
-                        }
-                      }}
+                      onClick={() => setPanelCambio('vacante')}
                       className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs transition-colors flex items-center space-x-1"
-                      title="El instructor ya no continúa: deja el espacio programado como vacante"
+                      title="El instructor ya no continúa: deja el espacio programado como vacante desde la fecha que indiques"
                     >
                       <UserX className="w-3.5 h-3.5" />
                       <span>Dejar Vacante</span>
@@ -2258,196 +2377,6 @@ const ReportesHorarioPanel: React.FC<ReportesHorarioPanelProps> = ({ ficha, curr
           )}
         </div>
       </div>
-    </div>
-  );
-};
-
-interface CompetenciaOpcion {
-  codigo: string;
-  denominacion: string;
-  tipo: string;
-}
-
-interface CompetenciaSearchSelectProps {
-  competencias: CompetenciaOpcion[];
-  selectedCodigo: string;
-  onChange: (codigo: string) => void;
-}
-
-// Selector de competencia con buscador (Ley de Hick/Fitts): con programas de
-// 19+ competencias, recorrer un <select> nativo uno por uno es lento — este
-// combobox permite escribir el código o un fragmento de la denominación y
-// filtrar la lista al instante, igual que el buscador de instructores en
-// Seguimiento.
-const CompetenciaSearchSelect: React.FC<CompetenciaSearchSelectProps> = ({ competencias, selectedCodigo, onChange }) => {
-  const [abierto, setAbierto] = React.useState(false);
-  const [busqueda, setBusqueda] = React.useState('');
-  const contenedorRef = React.useRef<HTMLDivElement>(null);
-
-  const seleccionada = competencias.find(c => c.codigo === selectedCodigo);
-
-  React.useEffect(() => {
-    if (!abierto) return;
-    const handleClickFuera = (e: MouseEvent) => {
-      if (contenedorRef.current && !contenedorRef.current.contains(e.target as Node)) {
-        setAbierto(false);
-        setBusqueda('');
-      }
-    };
-    document.addEventListener('mousedown', handleClickFuera);
-    return () => document.removeEventListener('mousedown', handleClickFuera);
-  }, [abierto]);
-
-  const filtradas = React.useMemo(() => {
-    const txt = busqueda.trim().toLowerCase();
-    if (!txt) return competencias;
-    return competencias.filter(c =>
-      c.codigo.toLowerCase().includes(txt) ||
-      c.denominacion.toLowerCase().includes(txt) ||
-      c.tipo.toLowerCase().includes(txt)
-    );
-  }, [competencias, busqueda]);
-
-  return (
-    <div className="relative" ref={contenedorRef}>
-      <button
-        type="button"
-        onClick={() => setAbierto(prev => !prev)}
-        className="w-full flex items-center justify-between space-x-2 bg-[#F8F9FA] border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-[#111C2D] focus:ring-2 focus:ring-[#0D631B] outline-none transition-all text-left"
-      >
-        <span className="truncate">
-          {seleccionada
-            ? `[${seleccionada.codigo}] ${seleccionada.tipo} - ${seleccionada.denominacion.slice(0, 65)}...`
-            : 'Selecciona una competencia...'}
-        </span>
-        <Search className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-      </button>
-
-      {abierto && (
-        <div className="absolute z-20 mt-1 w-full bg-white rounded-xl border border-slate-200 shadow-lg p-1.5 space-y-1">
-          <div className="relative">
-            <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              autoFocus
-              type="text"
-              value={busqueda}
-              onChange={e => setBusqueda(e.target.value)}
-              placeholder="Buscar por código, tipo o nombre..."
-              className="w-full pl-6 pr-2 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0D631B]"
-            />
-          </div>
-          <div className="max-h-56 overflow-y-auto">
-            {filtradas.length === 0 ? (
-              <div className="px-2 py-2 text-[11px] text-slate-400 text-center">Sin resultados</div>
-            ) : (
-              filtradas.map(comp => (
-                <button
-                  key={comp.codigo}
-                  type="button"
-                  onClick={() => { onChange(comp.codigo); setAbierto(false); setBusqueda(''); }}
-                  className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-[#E8F5E9] ${
-                    comp.codigo === selectedCodigo ? 'bg-[#E8F5E9] font-bold text-[#0D631B]' : 'text-slate-700'
-                  }`}
-                >
-                  <span className="font-mono">[{comp.codigo}]</span> {comp.tipo} - {comp.denominacion}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-interface InstructorVacanteSearchSelectProps {
-  instructores: Instructor[];
-  selectedId: string;
-  onChange: (instructorId: string) => void;
-}
-
-// Buscador de instructor para cubrir un espacio vacante (mismo patrón que el
-// buscador de competencias de arriba y el de instructores en Seguimiento):
-// con muchos instructores registrados, un <select> nativo obliga a recorrer
-// la lista completa — aquí se filtra al instante por nombre o especialidad.
-const InstructorVacanteSearchSelect: React.FC<InstructorVacanteSearchSelectProps> = ({ instructores, selectedId, onChange }) => {
-  const [abierto, setAbierto] = React.useState(false);
-  const [busqueda, setBusqueda] = React.useState('');
-  const contenedorRef = React.useRef<HTMLDivElement>(null);
-
-  const seleccionado = instructores.find(i => i.id === selectedId);
-
-  React.useEffect(() => {
-    if (!abierto) return;
-    const handleClickFuera = (e: MouseEvent) => {
-      if (contenedorRef.current && !contenedorRef.current.contains(e.target as Node)) {
-        setAbierto(false);
-        setBusqueda('');
-      }
-    };
-    document.addEventListener('mousedown', handleClickFuera);
-    return () => document.removeEventListener('mousedown', handleClickFuera);
-  }, [abierto]);
-
-  const filtrados = React.useMemo(() => {
-    const txt = busqueda.trim().toLowerCase();
-    if (!txt) return instructores;
-    return instructores.filter(i =>
-      i.nombreCompleto.toLowerCase().includes(txt) ||
-      (i.especialidad && i.especialidad.toLowerCase().includes(txt)) ||
-      (i.perfilTecnico && i.perfilTecnico.toLowerCase().includes(txt))
-    );
-  }, [instructores, busqueda]);
-
-  return (
-    <div className="relative" ref={contenedorRef}>
-      <button
-        type="button"
-        onClick={() => setAbierto(prev => !prev)}
-        className="w-full flex items-center justify-between space-x-2 bg-white border border-amber-300 rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-800 focus:ring-1 focus:ring-amber-500 outline-none transition-all text-left"
-      >
-        <span className="truncate">
-          {seleccionado ? seleccionado.nombreCompleto : '-- Selecciona un instructor --'}
-        </span>
-        <Search className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-      </button>
-
-      {abierto && (
-        <div className="absolute z-20 mt-1 w-full bg-white rounded-xl border border-slate-200 shadow-lg p-1.5 space-y-1">
-          <div className="relative">
-            <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              autoFocus
-              type="text"
-              value={busqueda}
-              onChange={e => setBusqueda(e.target.value)}
-              placeholder="Buscar por nombre o especialidad..."
-              className="w-full pl-6 pr-2 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-amber-500"
-            />
-          </div>
-          <div className="max-h-56 overflow-y-auto">
-            {filtrados.length === 0 ? (
-              <div className="px-2 py-2 text-[11px] text-slate-400 text-center">Sin resultados</div>
-            ) : (
-              filtrados.map(inst => (
-                <button
-                  key={inst.id}
-                  type="button"
-                  onClick={() => { onChange(inst.id); setAbierto(false); setBusqueda(''); }}
-                  className={`w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-amber-50 ${
-                    inst.id === selectedId ? 'bg-amber-50 font-bold text-amber-800' : 'text-slate-700'
-                  }`}
-                >
-                  <div className="font-semibold">{inst.nombreCompleto}</div>
-                  {(inst.especialidad || inst.perfilTecnico) && (
-                    <div className="text-[10px] text-slate-400 truncate">{inst.especialidad || inst.perfilTecnico}</div>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

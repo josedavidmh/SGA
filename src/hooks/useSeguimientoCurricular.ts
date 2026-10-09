@@ -215,7 +215,7 @@ export function useSeguimientoCurricular({
     // 2. Si no hay registro explícito, verificar si está asignado en los Horarios de la ficha
     const bloqueHorario = horarios.find(h =>
       h.fichaId === ficha.id && (
-        (h.rapsAsignados && h.rapsAsignados.some(r => r.codigo === rap.codigoRap)) ||
+        (h.rapsAsignados && h.rapsAsignados.some(r => r.codigo === rap.codigoRap && (!r.competenciaCodigo || r.competenciaCodigo === compCodigo))) ||
         h.rapCodigo === rap.codigoRap ||
         (h.esCompetenciaCompleta && h.competenciaCodigo === compCodigo)
       )

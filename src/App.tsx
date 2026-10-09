@@ -137,7 +137,7 @@ import {
   Instructor, 
   ProgramaFormacion,
   ActividadSeguimiento, 
-  BloqueHorario, 
+  BloqueHorario, ContenidoRapsBloque, 
   DiaSemana,
   AuditoriaIngesta, 
   AuditoriaSistema,
@@ -168,7 +168,9 @@ import {
   AUDITORIA_SISTEMA_INICIAL
 } from './mockData';
 import { generarUuid } from './lib/id';
-import { normalizarNombreTrimestre, trimestreDeFecha } from './lib/calendarioTrimestres';
+import { normalizarNombreTrimestre, trimestreDeFecha, fechasDeCorteTrimestre } from './lib/calendarioTrimestres';
+import { aplicarCambioInstructor, inicioTramoActual, sumarDiasISO, fechaCorta, paresRapDeBloque } from './lib/tramosInstructor';
+import { fechaISOLocal } from './lib/festivosColombia';
 import { fechaSofiaAISO, restarMeses } from './lib/fechas';
 import { esFichaDelLider, fichasPermitidas, puedeEditarHorarioDeFicha } from './lib/permisos';
 import { homologarInstructores } from './lib/nombresInstructor';
@@ -2824,30 +2826,23 @@ export default function App() {
   // vuelve a PENDIENTE pero SIN perder el historial de quién ya lo cubrió.
   // Se reutiliza al crear un bloque, al asignar un instructor a uno vacante y
   // al dejar vacante uno que ya tenía instructor (fin de contrato/reemplazo).
-  const sincronizarSeguimientoDesdeBloque = React.useCallback((bloque: Omit<BloqueHorario, 'id'> | BloqueHorario) => {
+  const sincronizarSeguimientoDesdeBloque = React.useCallback((bloque: Omit<BloqueHorario, 'id'> | BloqueHorario, opciones?: { finInstructorAnterior?: string }) => {
     if (!bloque.fichaId) return;
     const fichaTarget = fichas.find(f => f.id === bloque.fichaId);
     const fichaNum = fichaTarget?.numero_ficha || selectedFicha?.numero_ficha || '';
     const progCod = fichaTarget?.programaCodigo || selectedFicha?.programaCodigo || '';
 
-    // Competencia única del bloque: rapsAsignados nunca mezcla RAPs de
-    // competencias distintas (BloqueHorario solo tiene un competenciaCodigo).
-    const compCodigoBloque = bloque.competenciaCodigo;
-    const codigosRapsAfectados = new Set<string>();
-    if (bloque.rapsAsignados && bloque.rapsAsignados.length > 0) {
-      bloque.rapsAsignados.forEach(r => codigosRapsAfectados.add(r.codigo));
-    } else if (bloque.rapCodigo && !bloque.esCompetenciaCompleta) {
-      codigosRapsAfectados.add(bloque.rapCodigo);
-    } else if (bloque.esCompetenciaCompleta && bloque.competenciaCodigo) {
-      raps.filter(r => r.competenciaCodigo === bloque.competenciaCodigo).forEach(r => codigosRapsAfectados.add(r.codigoRap));
-    }
-    if (codigosRapsAfectados.size === 0) return;
+    // Un bloque puede cubrir RAPs de varias competencias (p. ej. un instructor
+    // que reemplaza y recibe RAPs de otra competencia): cada RAP se sincroniza
+    // con SU propia competencia.
+    const parejasRap = paresRapDeBloque(bloque, raps);
+    if (parejasRap.length === 0) return;
 
     const itemsParaSupabase: RapSeguimiento[] = [];
 
     setRapsSeguimiento(prevRapsSeg => {
       const nuevoSeg = [...prevRapsSeg];
-      codigosRapsAfectados.forEach(rapCod => {
+      parejasRap.forEach(({ competenciaCodigo: compCodigoBloque, rapCodigo: rapCod }) => {
         const rapObj = raps.find(r => r.codigoRap === rapCod && r.competenciaCodigo === compCodigoBloque);
         const compObj = competencias.find(c => c.codigo === compCodigoBloque);
         // El código de RAP (p.ej. "RAP 01") se reinicia en cada competencia,
@@ -2880,7 +2875,10 @@ export default function App() {
                 instructorId: anterior!.instructorId,
                 instructorNombre: anterior!.instructorNombre!,
                 trimestre: bloque.trimestre,
-                fechaFin: new Date().toISOString(),
+                // Con fecha de cambio, el instructor saliente termina ese día (no "hoy").
+                fechaFin: opciones?.finInstructorAnterior
+                  ? new Date(`${opciones.finInstructorAnterior}T23:59:59`).toISOString()
+                  : new Date().toISOString(),
                 motivo: bloque.instructorId ? 'REEMPLAZO' : 'VACANTE_HORARIO'
               }
             ]
@@ -3009,30 +3007,32 @@ export default function App() {
   // contrato o el trimestre lo requiere), dejando el RAP/día/franja/trimestre
   // reservado como "vacante" para que otro instructor lo cubra después — sin
   // perder el espacio en el horario ni borrar que este instructor ya estuvo ahí.
-  const handleQuitarInstructorDeBloque = (bloqueId: string) => {
+  const handleQuitarInstructorDeBloque = (bloqueId: string, desde?: string) => {
     const bloqueOriginal = horarios.find(b => b.id === bloqueId);
     if (!bloqueOriginal || !bloqueOriginal.instructorId) return;
 
-    if (bloqueOriginal.instructorId) {
-      setInstructores(prev => prev.map(inst =>
-        inst.id === bloqueOriginal.instructorId
-          ? { ...inst, horasSemanalesAsignadas: Math.max(0, inst.horasSemanalesAsignadas - bloqueOriginal.duracionHoras) }
-          : inst
-      ));
-    }
+    const inicioCorte = fechasDeCorteTrimestre(trimestresCalendario, bloqueOriginal.trimestre).inicio;
+    const inicioActual = inicioTramoActual(bloqueOriginal, inicioCorte);
+    // Sin fecha: el instructor sale de todo el tramo actual (comportamiento de siempre).
+    const desdeEfectivo = desde && desde > inicioActual ? desde : inicioActual;
+    const conFecha = desdeEfectivo > inicioActual;
 
-    const bloqueVacante: BloqueHorario = {
-      ...bloqueOriginal,
-      instructorId: undefined,
-      instructorNombre: undefined,
-      vacante: true
-    };
+    setInstructores(prev => prev.map(inst =>
+      inst.id === bloqueOriginal.instructorId
+        ? { ...inst, horasSemanalesAsignadas: Math.max(0, inst.horasSemanalesAsignadas - bloqueOriginal.duracionHoras) }
+        : inst
+    ));
+
+    const bloqueVacante: BloqueHorario = aplicarCambioInstructor(bloqueOriginal, undefined, desdeEfectivo, inicioCorte);
     setHorarios(prev => prev.map(b => b.id === bloqueId ? bloqueVacante : b));
-    sincronizarSeguimientoDesdeBloque(bloqueVacante);
+    // Si la fecha del cambio es futura, el Seguimiento sigue con el instructor vigente y se actualiza cuando llegue la fecha.
+    if (!conFecha || desdeEfectivo <= fechaISOLocal(new Date())) {
+      sincronizarSeguimientoDesdeBloque(bloqueVacante, conFecha ? { finInstructorAnterior: sumarDiasISO(desdeEfectivo, -1) } : undefined);
+    }
     updateHorarioInSupabase(bloqueVacante).then(res => {
       if (!res.success) {
         console.error('Error al marcar bloque vacante en Supabase:', res.error);
-        alert(`El cambio quedó en pantalla, pero NO se guardó en Supabase:\n\n${res.error}`);
+        alert(`El cambio quedó en pantalla, pero NO se guardó completo en Supabase:\n\n${res.error}`);
       }
     }).catch(err => {
       console.error('Error al marcar bloque vacante en Supabase:', err);
@@ -3042,34 +3042,78 @@ export default function App() {
     registrarLog(
       'BLOQUE_MARCADO_VACANTE',
       'Programación de Horarios',
-      `${bloqueOriginal.instructorNombre} dejó de cubrir ${bloqueOriginal.rapCodigo} (${bloqueOriginal.diaSemana} ${bloqueOriginal.franja}) en Ficha ${numFicha} — espacio queda vacante para reasignar.`
+      `${bloqueOriginal.instructorNombre} dejó de cubrir ${bloqueOriginal.rapCodigo} (${bloqueOriginal.diaSemana} ${bloqueOriginal.franja}) en Ficha ${numFicha}${conFecha ? ` — su último día fue el ${fechaCorta(sumarDiasISO(desdeEfectivo, -1))}` : ''} — espacio queda vacante para reasignar.`
     );
   };
 
+  // Cambios de instructor con fecha: cuando llega la fecha de entrada del nuevo instructor,
+  // el Seguimiento de RAPs pasa a él (antes sigue el vigente). Solo toca RAPs cuyo instructor
+  // vino del Horario y que todavía muestran a otra persona; no repite lo ya sincronizado.
+  const [hoyISOApp, setHoyISOApp] = React.useState(() => fechaISOLocal(new Date()));
+  React.useEffect(() => {
+    const id = setInterval(() => setHoyISOApp(fechaISOLocal(new Date())), 30 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+  const cambiosSincronizadosRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    horarios.forEach(b => {
+      if (!b.instructorDesde || b.instructorDesde > hoyISOApp) return;
+      const clave = `${b.id}|${b.instructorId || ''}|${b.instructorDesde}`;
+      if (cambiosSincronizadosRef.current.has(clave)) return;
+      const fichaB = fichas.find(f => f.id === b.fichaId);
+      const registros = paresRapDeBloque(b, raps).map(p => rapsSeguimiento.find(s =>
+        (s.fichaId === b.fichaId || s.fichaNumero === fichaB?.numero_ficha) &&
+        s.competenciaCodigo === p.competenciaCodigo && s.rapCodigo === p.rapCodigo)).filter(Boolean) as RapSeguimiento[];
+      // Si todavía no cargó el Seguimiento no hay nada que comparar: se vuelve a intentar luego.
+      if (registros.length === 0) return;
+      const pendiente = registros.some(seg => seg.fuenteInstructor === 'HORARIO' && (seg.instructorNombre || '') !== (b.instructorNombre || ''));
+      cambiosSincronizadosRef.current.add(clave);
+      if (pendiente) sincronizarSeguimientoDesdeBloque(b, { finInstructorAnterior: sumarDiasISO(b.instructorDesde, -1) });
+    });
+  }, [horarios, rapsSeguimiento, raps, fichas, hoyISOApp, sincronizarSeguimientoDesdeBloque]);
+
   // Asignar un instructor a un bloque que estaba vacante (o reemplazar el que
   // tenía), sin tener que recrear el bloque desde cero.
-  const handleAsignarInstructorABloque = (bloqueId: string, instructor: Instructor) => {
+  const handleAsignarInstructorABloque = (bloqueId: string, instructor: Instructor, desde?: string, nuevosRaps?: ContenidoRapsBloque) => {
     const bloqueOriginal = horarios.find(b => b.id === bloqueId);
     if (!bloqueOriginal) return;
 
-    setInstructores(prev => prev.map(inst =>
-      inst.id === instructor.id
-        ? { ...inst, horasSemanalesAsignadas: inst.horasSemanalesAsignadas + bloqueOriginal.duracionHoras }
-        : inst
-    ));
+    const inicioCorte = fechasDeCorteTrimestre(trimestresCalendario, bloqueOriginal.trimestre).inicio;
+    const inicioActual = inicioTramoActual(bloqueOriginal, inicioCorte);
+    // Sin fecha: el nuevo instructor cubre todo el tramo actual (comportamiento de siempre).
+    const desdeEfectivo = desde && desde > inicioActual ? desde : inicioActual;
+    const conFecha = desdeEfectivo > inicioActual;
+    const instructorSaliente = bloqueOriginal.instructorId && bloqueOriginal.instructorId !== instructor.id
+      ? { id: bloqueOriginal.instructorId, nombre: bloqueOriginal.instructorNombre }
+      : undefined;
 
-    const bloqueActualizado: BloqueHorario = {
-      ...bloqueOriginal,
-      instructorId: instructor.id,
-      instructorNombre: instructor.nombreCompleto,
-      vacante: false
-    };
+    setInstructores(prev => prev.map(inst => {
+      if (inst.id === instructor.id && inst.id !== bloqueOriginal.instructorId) {
+        return { ...inst, horasSemanalesAsignadas: inst.horasSemanalesAsignadas + bloqueOriginal.duracionHoras };
+      }
+      // Reemplazo: el instructor saliente libera sus horas semanales de este espacio.
+      if (instructorSaliente && inst.id === instructorSaliente.id) {
+        return { ...inst, horasSemanalesAsignadas: Math.max(0, inst.horasSemanalesAsignadas - bloqueOriginal.duracionHoras) };
+      }
+      return inst;
+    }));
+
+    const bloqueActualizado: BloqueHorario = aplicarCambioInstructor(
+      bloqueOriginal,
+      { id: instructor.id, nombre: instructor.nombreCompleto },
+      desdeEfectivo,
+      inicioCorte,
+      nuevosRaps
+    );
     setHorarios(prev => prev.map(b => b.id === bloqueId ? bloqueActualizado : b));
-    sincronizarSeguimientoDesdeBloque(bloqueActualizado);
+    // Si la fecha del cambio es futura, el Seguimiento sigue con el instructor vigente y se actualiza cuando llegue la fecha.
+    if (!conFecha || desdeEfectivo <= fechaISOLocal(new Date())) {
+      sincronizarSeguimientoDesdeBloque(bloqueActualizado, conFecha ? { finInstructorAnterior: sumarDiasISO(desdeEfectivo, -1) } : undefined);
+    }
     updateHorarioInSupabase(bloqueActualizado).then(res => {
       if (!res.success) {
         console.error('Error al asignar instructor a bloque en Supabase:', res.error);
-        alert(`La asignación quedó en pantalla, pero NO se guardó en Supabase:\n\n${res.error}`);
+        alert(`La asignación quedó en pantalla, pero NO se guardó completa en Supabase:\n\n${res.error}`);
       }
     }).catch(err => {
       console.error('Error al asignar instructor a bloque en Supabase:', err);
@@ -3077,9 +3121,11 @@ export default function App() {
 
     const numFicha = selectedFicha ? selectedFicha.numero_ficha : 'N/A';
     registrarLog(
-      'INSTRUCTOR_ASIGNADO_A_VACANTE',
+      instructorSaliente ? 'INSTRUCTOR_REEMPLAZADO_EN_BLOQUE' : 'INSTRUCTOR_ASIGNADO_A_VACANTE',
       'Programación de Horarios',
-      `${instructor.nombreCompleto} cubre ahora ${bloqueOriginal.rapCodigo} (${bloqueOriginal.diaSemana} ${bloqueOriginal.franja}) en Ficha ${numFicha}.`
+      instructorSaliente
+        ? `${instructor.nombreCompleto} reemplaza a ${instructorSaliente.nombre} en ${bloqueOriginal.rapCodigo} (${bloqueOriginal.diaSemana} ${bloqueOriginal.franja}) en Ficha ${numFicha}, ${conFecha ? `desde el ${fechaCorta(desdeEfectivo)}` : 'todo el trimestre'}.`
+        : `${instructor.nombreCompleto} cubre ahora ${bloqueOriginal.rapCodigo} (${bloqueOriginal.diaSemana} ${bloqueOriginal.franja}) en Ficha ${numFicha}${conFecha ? ` desde el ${fechaCorta(desdeEfectivo)}` : ''}.`
     );
   };
 
@@ -3100,19 +3146,11 @@ export default function App() {
       // Antes, liberar un bloque no revertía nada en Seguimiento: el RAP se
       // quedaba marcado "En Ejecución" con el instructor aunque ya no tuviera
       // ninguna clase programada.
-      const codigosRapsDelBloque = new Set<string>();
-      if (bloqueAEliminar.rapsAsignados && bloqueAEliminar.rapsAsignados.length > 0) {
-        bloqueAEliminar.rapsAsignados.forEach(r => codigosRapsDelBloque.add(r.codigo));
-      } else if (bloqueAEliminar.rapCodigo && !bloqueAEliminar.esCompetenciaCompleta) {
-        codigosRapsDelBloque.add(bloqueAEliminar.rapCodigo);
-      } else if (bloqueAEliminar.esCompetenciaCompleta && bloqueAEliminar.competenciaCodigo) {
-        raps.filter(r => r.competenciaCodigo === bloqueAEliminar.competenciaCodigo).forEach(r => codigosRapsDelBloque.add(r.codigoRap));
-      }
+      const parejasRapDelBloque = paresRapDeBloque(bloqueAEliminar, raps);
 
-      if (codigosRapsDelBloque.size > 0 && bloqueAEliminar.fichaId) {
+      if (parejasRapDelBloque.length > 0 && bloqueAEliminar.fichaId) {
         const fichaTarget = fichas.find(f => f.id === bloqueAEliminar.fichaId);
         const fichaNumBloque = fichaTarget?.numero_ficha || '';
-        const compCodigoBloque = bloqueAEliminar.competenciaCodigo;
         // Bloques que quedan DESPUÉS de esta eliminación (para saber si algún
         // otro bloque todavía cubre el mismo RAP y por eso no debe revertirse).
         const horariosRestantes = horarios.filter(b => b.id !== bloqueId);
@@ -3120,13 +3158,10 @@ export default function App() {
 
         setRapsSeguimiento(prevRapsSeg => {
           const nuevoSeg = [...prevRapsSeg];
-          codigosRapsDelBloque.forEach(rapCod => {
+          parejasRapDelBloque.forEach(({ competenciaCodigo: compCodigoBloque, rapCodigo: rapCod }) => {
             const siguemAsignadoEnOtroBloque = horariosRestantes.some(h =>
-              h.fichaId === bloqueAEliminar.fichaId && (
-                (h.rapsAsignados && h.rapsAsignados.some(r => r.codigo === rapCod)) ||
-                h.rapCodigo === rapCod ||
-                (h.esCompetenciaCompleta && h.competenciaCodigo === compCodigoBloque)
-              )
+              h.fichaId === bloqueAEliminar.fichaId &&
+              paresRapDeBloque(h, raps).some(p => p.rapCodigo === rapCod && p.competenciaCodigo === compCodigoBloque)
             );
             if (siguemAsignadoEnOtroBloque) return;
 

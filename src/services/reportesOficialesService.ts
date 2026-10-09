@@ -9,6 +9,8 @@ import {
 import { contarOcurrenciasDia, fechaISOLocal } from '../lib/festivosColombia';
 import { esBloqueVacante } from '../lib/bloques';
 import { claveNombrePersona } from '../lib/nombresInstructor';
+import { aFormatoOracion } from '../lib/textoOracion';
+import { expandirTramosInstructor } from '../lib/tramosInstructor';
 import {
   PALETA, nuevoLibro, descargarLibro, estilarRango, bordeCelda, marcoExterior, celdaDatoExcel,
   encabezadoTablaExcel, configurarHojaExcel, rellenoExcel, fechaGeneracion
@@ -66,18 +68,25 @@ export async function generarFormatoAsociacionFichas(
   const porCompetencia = new Map<string, { competenciaDenominacion: string; instructorNombre: string }>();
 
   if (filtroTrimestre) {
-    filtroTrimestre.bloquesTrimestre
+    expandirTramosInstructor(filtroTrimestre.bloquesTrimestre)
       .filter(b => !esBloqueVacante(b) && b.instructorNombre)
       .forEach(b => {
         // Una fila por competencia + instructor: una misma competencia puede
         // tener varios instructores (cada uno con RAPs distintos).
-        const key = `${b.competenciaCodigo}||${claveNombrePersona(b.instructorNombre!)}`;
-        if (!porCompetencia.has(key)) {
-          porCompetencia.set(key, {
-            competenciaDenominacion: b.competenciaNombre || b.competenciaCodigo,
-            instructorNombre: b.instructorNombre!
-          });
-        }
+        // Un instructor puede recibir RAPs de otras competencias en el mismo
+        // espacio: cada competencia suma su propio renglón.
+        const competenciasDelBloque = new Map<string, string>([[b.competenciaCodigo, b.competenciaNombre || b.competenciaCodigo]]);
+        (b.rapsAsignados || []).forEach(r => {
+          if (r.competenciaCodigo && !competenciasDelBloque.has(r.competenciaCodigo)) {
+            competenciasDelBloque.set(r.competenciaCodigo, r.competenciaNombre || r.competenciaCodigo);
+          }
+        });
+        competenciasDelBloque.forEach((nombreComp, codComp) => {
+          const key = `${codComp}||${claveNombrePersona(b.instructorNombre!)}`;
+          if (!porCompetencia.has(key)) {
+            porCompetencia.set(key, { competenciaDenominacion: nombreComp, instructorNombre: b.instructorNombre! });
+          }
+        });
       });
   } else {
     rapsSeguimientoFicha
@@ -171,7 +180,7 @@ export async function generarFormatoAsociacionFichas(
   let fila = filaEnc + 1;
   filas.forEach((f, idx) => {
     const fondo = idx % 2 === 0 ? PALETA.blanco : PALETA.zebra;
-    const valores: (string | number)[] = [ficha.programaCodigo, Number(ficha.numero_ficha) || ficha.numero_ficha, ficha.programaNombre, f.competenciaDenominacion, f.instructorNombre];
+    const valores: (string | number)[] = [ficha.programaCodigo, Number(ficha.numero_ficha) || ficha.numero_ficha, ficha.programaNombre, aFormatoOracion(f.competenciaDenominacion), f.instructorNombre];
     valores.forEach((v, c) => {
       const cel = ws.getCell(fila, c + 1);
       cel.value = v as any;
@@ -252,7 +261,7 @@ interface InfoEvento {
   /** Un elemento por cada RAP real de la competencia del bloque, para que
    * el llamador pueda ponerlos en filas separadas en vez de en una sola
    * celda concatenada. */
-  rapsIndividuales: { resultadoAprendizaje: string; descripcionActividad: string }[];
+  rapsIndividuales: { resultadoAprendizaje: string; descripcionActividad: string; competenciaCodigo: string; competenciaNombre: string }[];
 }
 
 /**
@@ -266,15 +275,24 @@ interface InfoEvento {
  * - la descripción de actividad de aprendizaje asociada.
  */
 function resolverInfoEvento(bloque: BloqueHorario, catalogoRaps: ResultadoAprendizaje[]): InfoEvento {
-  const codigosRap = bloque.rapsAsignados?.length
-    ? bloque.rapsAsignados.map(r => r.codigo)
-    : [bloque.rapCodigo].filter(Boolean);
+  // Pares (competencia, RAP): el código de RAP se repite entre competencias y un
+  // bloque puede traer RAPs de varias (p. ej. un instructor que reemplaza).
+  const entradas = bloque.rapsAsignados?.length
+    ? bloque.rapsAsignados.map(r => ({ comp: r.competenciaCodigo || bloque.competenciaCodigo, cod: r.codigo, nombreComp: r.competenciaNombre }))
+    : [{ comp: bloque.competenciaCodigo, cod: bloque.rapCodigo, nombreComp: undefined as string | undefined }].filter(e => e.cod);
+  const ordenComps = Array.from(new Set(entradas.map(e => e.comp)));
 
   const rapsDeLaCompetencia = catalogoRaps.filter(
     r => r.competenciaCodigo === bloque.competenciaCodigo
   );
-  const rapsDelBloque = rapsDeLaCompetencia.filter(r => codigosRap.includes(r.codigoRap));
+  const rapsDelBloque = catalogoRaps
+    .filter(r => entradas.some(e => e.comp === r.competenciaCodigo && e.cod === r.codigoRap))
+    .sort((a, b) => ordenComps.indexOf(a.competenciaCodigo) - ordenComps.indexOf(b.competenciaCodigo));
   const rapsParaTexto = rapsDelBloque.length > 0 ? rapsDelBloque : rapsDeLaCompetencia;
+  const nombreCompetenciaDe = (r: ResultadoAprendizaje) =>
+    r.competenciaCodigo === bloque.competenciaCodigo
+      ? (bloque.competenciaNombre || r.competenciaDenominacion || r.competenciaCodigo)
+      : (entradas.find(e => e.comp === r.competenciaCodigo)?.nombreComp || r.competenciaDenominacion || r.competenciaCodigo);
 
   const actividadesProyecto = new Set<string>();
   const actividadesAprendizaje = new Set<string>();
@@ -289,7 +307,9 @@ function resolverInfoEvento(bloque: BloqueHorario, catalogoRaps: ResultadoAprend
     descripcionActividad: Array.from(actividadesAprendizaje).join('\n\n'),
     rapsIndividuales: rapsParaTexto.map(r => ({
       resultadoAprendizaje: normalizarTexto(r.denominacion),
-      descripcionActividad: (r.actividadesAprendizaje || []).map(normalizarTexto).join('\n\n')
+      descripcionActividad: (r.actividadesAprendizaje || []).map(normalizarTexto).join('\n\n'),
+      competenciaCodigo: r.competenciaCodigo,
+      competenciaNombre: nombreCompetenciaDe(r)
     }))
   };
 }
@@ -349,10 +369,13 @@ export async function generarFormatoEventos(
   };
   // Orden: día de la semana y, dentro del día, hora de inicio (así los bloques
   // consecutivos de una misma jornada quedan uno al lado del otro).
-  const bloquesOrdenados = [...bloquesTrimestre].sort((a, b) => {
+  // Un espacio con cambio de instructor a mitad de trimestre se reporta como un
+  // evento por instructor, cada uno con sus propias fechas y horas.
+  const bloquesOrdenados = expandirTramosInstructor(bloquesTrimestre).sort((a, b) => {
     const orden = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
     return orden.indexOf(a.diaSemana) - orden.indexOf(b.diaSemana)
-      || minutosDe(partirFranja(a.franja)[0]) - minutosDe(partirFranja(b.franja)[0]);
+      || minutosDe(partirFranja(a.franja)[0]) - minutosDe(partirFranja(b.franja)[0])
+      || String(a.fechaCorteInicio).localeCompare(String(b.fechaCorteInicio));
   });
 
   const detalleHoras: DetalleHorasEvento[] = [];
@@ -370,6 +393,7 @@ export async function generarFormatoEventos(
 
   const filas: (string | number)[][] = [];
   const grupoDeFila: number[] = [];
+  const competenciaDeFila: string[] = [];
   let grupoActual = -1;
 
   // Un "evento" es uno o varios bloques consecutivos que se reportan juntos.
@@ -442,7 +466,9 @@ export async function generarFormatoEventos(
     // con el texto consolidado que ya trae `info`.
     const rapsFilas = info.rapsIndividuales.length > 0 ? info.rapsIndividuales : [{
       resultadoAprendizaje: info.resultadoAprendizaje,
-      descripcionActividad: info.descripcionActividad
+      descripcionActividad: info.descripcionActividad,
+      competenciaCodigo: bloque.competenciaCodigo,
+      competenciaNombre: bloque.competenciaNombre || ''
     }];
 
     grupoActual++;
@@ -451,6 +477,7 @@ export async function generarFormatoEventos(
 
     rapsFilas.forEach((r, i) => {
       grupoDeFila.push(grupoActual);
+      competenciaDeFila.push(r.competenciaCodigo || bloque.competenciaCodigo || `__sin_competencia_${grupoActual}`);
       filas.push([
         esPrimerBloqueGlobal && i === 0 ? (Number(ficha.numero_ficha) || ficha.numero_ficha) : '',
         esPrimerBloqueGlobal && i === 0 ? ficha.programaNombre : '',
@@ -459,22 +486,23 @@ export async function generarFormatoEventos(
         i === 0 ? fechaFinaliza : '',
         i === 0 ? horaInicia : '',
         i === 0 ? horaFinaliza : '',
-        i === 0 ? (info.actividadProyecto || '') : '',
+        i === 0 ? aFormatoOracion(info.actividadProyecto || '') : '',
         i === 0 ? (esBloqueVacante(bloque) ? 'Por Definir' : normalizarTexto(bloque.instructorNombre)) : '',
         i === 0 ? horasEjecutadas : '',
         i === 0 ? bloque.diaSemana : '',
-        r.descripcionActividad,
-        r.resultadoAprendizaje,
-        i === 0 ? (bloque.competenciaNombre || '') : ''
+        aFormatoOracion(r.descripcionActividad),
+        aFormatoOracion(r.resultadoAprendizaje),
+        aFormatoOracion(r.competenciaNombre || bloque.competenciaNombre || '')
       ]);
     });
 
     // Combinar verticalmente, dentro de este grupo de filas (un RAP por
     // fila), las columnas que pertenecen al bloque completo y no a cada
     // RAP individual: fecha evento, horario, evento, instructor, horas,
-    // día y competencia (columnas 1-indexadas 4,5,6,7,8,9,10,11,14).
+    // día (columnas 1-indexadas 4,5,6,7,8,9,10,11). La competencia se
+    // combina aparte, entre eventos contiguos de la misma competencia.
     if (rapsFilas.length > 1) {
-      [3, 4, 5, 6, 7, 8, 9, 10, 13].forEach(col => {
+      [3, 4, 5, 6, 7, 8, 9, 10].forEach(col => {
         merges.push({ r1: filaInicioGrupo, c1: col + 1, r2: filaFinGrupo, c2: col + 1 });
       });
     }
@@ -495,6 +523,34 @@ export async function generarFormatoEventos(
   if (hayDatos) {
     [1, 2, 3].forEach(col => {
       merges.push({ r1: FILA_INICIO_DATOS, c1: col, r2: filaUltimaDatos, c2: col });
+    });
+  }
+
+  // Celdas contiguas con el mismo contenido dentro de una misma competencia
+  // se combinan hacia abajo: la competencia (col. 14) y, cuando se repiten,
+  // la descripción de la actividad (col. 12) y el resultado de aprendizaje (col. 13).
+  // `inicioRun[col][i]` guarda la fila (índice en `filas`) donde empieza la celda
+  // combinada que contiene a la fila i, para usar su mismo color de fondo.
+  const inicioRun: Record<number, number[]> = { 12: [], 13: [], 14: [] };
+  const combinarContiguas = (col: number, igual: (a: number, b: number) => boolean) => {
+    let ini = 0;
+    for (let i = 0; i < filas.length; i++) {
+      if (i > 0 && !igual(i - 1, i)) {
+        if (i - 1 > ini) merges.push({ r1: FILA_INICIO_DATOS + ini, c1: col, r2: FILA_INICIO_DATOS + i - 1, c2: col });
+        ini = i;
+      }
+      inicioRun[col][i] = ini;
+    }
+    const ultima = filas.length - 1;
+    if (ultima > ini) merges.push({ r1: FILA_INICIO_DATOS + ini, c1: col, r2: FILA_INICIO_DATOS + ultima, c2: col });
+  };
+  if (hayDatos) {
+    combinarContiguas(14, (a, b) => competenciaDeFila[a] === competenciaDeFila[b]);
+    [12, 13].forEach(col => {
+      combinarContiguas(col, (a, b) =>
+        competenciaDeFila[a] === competenciaDeFila[b]
+        && String(filas[a][col - 1] || '') !== ''
+        && String(filas[a][col - 1]) === String(filas[b][col - 1]));
     });
   }
 
@@ -600,9 +656,10 @@ export async function generarFormatoEventos(
   const centrada = new Set([1, 2, 3, 4, 5, 6, 7, 10, 11]);
   for (let i = 0; i < filas.length; i++) {
     const r = FILA_INICIO_DATOS + i;
-    const fondo = grupoDeFila[i] % 2 === 0 ? PALETA.blanco : PALETA.zebra;
     for (let c = 1; c <= N; c++) {
       const cel = ws.getCell(r, c);
+      const filaFondo = inicioRun[c] ? inicioRun[c][i] : i;
+      const fondo = grupoDeFila[filaFondo] % 2 === 0 ? PALETA.blanco : PALETA.zebra;
       // El estilo de una celda combinada lo define la última fila escrita: se decide por grupo.
       const primeraDelGrupo = grupoDeFila.indexOf(grupoDeFila[i]);
       const porDefinir = c === 9 && String(filas[primeraDelGrupo][8]) === 'Por Definir';
@@ -620,6 +677,46 @@ export async function generarFormatoEventos(
       };
       bordeCelda(cel, PALETA.bordeFuerte);
     }
+  }
+
+  // Alturas de fila explícitas: Excel no ajusta solo la altura de las celdas
+  // combinadas, así que se estima según el texto y el ancho de cada columna.
+  if (hayDatos) {
+    const anchos = [20, 24, 19, 13, 13, 10, 10, 36, 24, 12, 13, 46, 46, 46];
+    const LINEA = 13.5;
+    const lineasDe = (texto: string, col: number) => {
+      const porLinea = Math.max(6, Math.floor(anchos[col - 1] * 1.0) - 3);
+      return String(texto || '').split('\n').reduce((acc, parrafo) => acc + Math.max(1, Math.ceil(parrafo.length / porLinea)), 0);
+    };
+    const filasTotales = filas.length;
+    const alto: number[] = new Array(filasTotales).fill(20);
+    // Rangos combinados (incluye los de grupo) y celdas sueltas.
+    const rangos: { r1: number; r2: number; texto: string; col: number }[] = [];
+    const cubiertas = new Set<string>();
+    merges.forEach(m => {
+      const i1 = m.r1 - FILA_INICIO_DATOS, i2 = m.r2 - FILA_INICIO_DATOS;
+      if (m.c1 >= 4 && m.c1 <= 14 && i2 > i1) {
+        rangos.push({ r1: i1, r2: i2, texto: String(filas[i1][m.c1 - 1] ?? ''), col: m.c1 });
+        for (let i = i1; i <= i2; i++) cubiertas.add(`${i}|${m.c1}`);
+      }
+    });
+    for (let i = 0; i < filasTotales; i++) {
+      for (let c = 4; c <= 14; c++) {
+        if (cubiertas.has(`${i}|${c}`)) continue;
+        const n = lineasDe(String(filas[i][c - 1] ?? ''), c);
+        alto[i] = Math.max(alto[i], n * LINEA + 6);
+      }
+    }
+    rangos.forEach(rg => {
+      const necesaria = lineasDe(rg.texto, rg.col) * LINEA + 6;
+      let actual = 0;
+      for (let i = rg.r1; i <= rg.r2; i++) actual += alto[i];
+      if (actual < necesaria) {
+        const extra = (necesaria - actual) / (rg.r2 - rg.r1 + 1);
+        for (let i = rg.r1; i <= rg.r2; i++) alto[i] += extra;
+      }
+    });
+    alto.forEach((h, i) => { ws.getRow(FILA_INICIO_DATOS + i).height = Math.min(409, Math.round(h * 10) / 10); });
   }
 
   // ---- Fila de totales y marco exterior.
