@@ -104,26 +104,59 @@ const INDICE_DIA_SEMANA: Record<string, number> = {
 };
 
 /**
+ * Convierte "AAAA-MM-DD" (o "AAAA-MM-DDTHH:mm…") en una fecha LOCAL a medianoche.
+ * `new Date("2026-10-02")` se interpreta como UTC y, en Colombia (UTC−5),
+ * cae en la tarde del 1 de octubre: se corre un día. Aquí se evita.
+ */
+export function parsearFechaLocal(texto: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec((texto || '').trim());
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const d = new Date(texto);
+  if (isNaN(d.getTime())) return null;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/** Fecha local como "AAAA-MM-DD". */
+export function fechaISOLocal(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+/**
  * Cuenta cuántas veces cae un día de la semana entre dos fechas (ambas
  * incluidas), y cuáles de esas ocurrencias son festivo en Colombia (por lo
  * tanto no hubo clase ese día aunque el bloque estuviera programado).
+ *
+ * También devuelve la PRIMERA y la ÚLTIMA fecha en que realmente hay clase
+ * (ese día de la semana y no festivo): son las fechas reales de inicio y fin
+ * del evento, p. ej. un martes dentro de un trimestre que empieza un viernes
+ * 2 de octubre inicia el martes 6 de octubre.
  */
 export function contarOcurrenciasDia(
   diaSemana: string,
   fechaInicioStr: string,
   fechaFinStr: string
-): { totalOcurrencias: number; ocurrenciasHabiles: number; festivosExcluidos: Date[] } {
+): {
+  totalOcurrencias: number;
+  ocurrenciasHabiles: number;
+  festivosExcluidos: Date[];
+  primeraFechaHabil: Date | null;
+  ultimaFechaHabil: Date | null;
+} {
   const objetivo = INDICE_DIA_SEMANA[diaSemana];
-  const inicio = new Date(fechaInicioStr);
-  const fin = new Date(fechaFinStr);
+  const inicio = parsearFechaLocal(fechaInicioStr);
+  const fin = parsearFechaLocal(fechaFinStr);
 
-  if (objetivo === undefined || isNaN(inicio.getTime()) || isNaN(fin.getTime()) || inicio > fin) {
-    return { totalOcurrencias: 0, ocurrenciasHabiles: 0, festivosExcluidos: [] };
+  if (objetivo === undefined || !inicio || !fin || inicio > fin) {
+    return { totalOcurrencias: 0, ocurrenciasHabiles: 0, festivosExcluidos: [], primeraFechaHabil: null, ultimaFechaHabil: null };
   }
 
   let totalOcurrencias = 0;
   let ocurrenciasHabiles = 0;
   const festivosExcluidos: Date[] = [];
+  let primeraFechaHabil: Date | null = null;
+  let ultimaFechaHabil: Date | null = null;
 
   const cursor = new Date(inicio);
   // Avanzar al primer día que coincida con el día de la semana objetivo
@@ -137,9 +170,11 @@ export function contarOcurrenciasDia(
       festivosExcluidos.push(new Date(cursor));
     } else {
       ocurrenciasHabiles += 1;
+      if (!primeraFechaHabil) primeraFechaHabil = new Date(cursor);
+      ultimaFechaHabil = new Date(cursor);
     }
     cursor.setDate(cursor.getDate() + 7);
   }
 
-  return { totalOcurrencias, ocurrenciasHabiles, festivosExcluidos };
+  return { totalOcurrencias, ocurrenciasHabiles, festivosExcluidos, primeraFechaHabil, ultimaFechaHabil };
 }

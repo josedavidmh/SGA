@@ -6,7 +6,7 @@ import {
   RapSeguimiento,
   ResultadoAprendizaje
 } from '../types';
-import { contarOcurrenciasDia } from '../lib/festivosColombia';
+import { contarOcurrenciasDia, fechaISOLocal } from '../lib/festivosColombia';
 import { esBloqueVacante } from '../lib/bloques';
 import { claveNombrePersona } from '../lib/nombresInstructor';
 import {
@@ -377,6 +377,8 @@ export async function generarFormatoEventos(
     bloque: BloqueHorario;
     horaInicia: string;
     horaFinaliza: string;
+    fechaInicia: string;
+    fechaFinaliza: string;
     horasEjecutadas: number;
     info: InfoEvento;
     bloquesUnidos: number;
@@ -384,11 +386,15 @@ export async function generarFormatoEventos(
 
   const porBloque: EventoUnido[] = bloquesOrdenados.map(bloque => {
     const [horaInicia, horaFinaliza] = partirFranja(bloque.franja);
-    const { totalOcurrencias, ocurrenciasHabiles, festivosExcluidos } = contarOcurrenciasDia(
+    const { totalOcurrencias, ocurrenciasHabiles, festivosExcluidos, primeraFechaHabil, ultimaFechaHabil } = contarOcurrenciasDia(
       bloque.diaSemana,
       bloque.fechaCorteInicio,
       bloque.fechaCorteFin
     );
+    // Fechas reales del evento: primer y último día en que ese día de la
+    // semana tiene clase (sin festivos) dentro del rango del bloque.
+    const fechaInicia = primeraFechaHabil ? fechaISOLocal(primeraFechaHabil) : bloque.fechaCorteInicio;
+    const fechaFinaliza = ultimaFechaHabil ? fechaISOLocal(ultimaFechaHabil) : bloque.fechaCorteFin;
     const horasEjecutadas = ocurrenciasHabiles * (bloque.duracionHoras || 0);
     totalHorasEjecutadas += horasEjecutadas;
     festivosTotalesExcluidos += festivosExcluidos.length;
@@ -400,7 +406,7 @@ export async function generarFormatoEventos(
       festivosExcluidos: festivosExcluidos.map(f => f.toLocaleDateString('es-CO')),
       horasEjecutadas
     });
-    return { bloque, horaInicia, horaFinaliza, horasEjecutadas, info: resolverInfoEvento(bloque, catalogoRaps), bloquesUnidos: 1 };
+    return { bloque, horaInicia, horaFinaliza, fechaInicia, fechaFinaliza, horasEjecutadas, info: resolverInfoEvento(bloque, catalogoRaps), bloquesUnidos: 1 };
   });
 
   // Une los bloques contiguos (el uno termina cuando empieza el otro) del mismo
@@ -411,8 +417,8 @@ export async function generarFormatoEventos(
   const claveContenido = (e: EventoUnido) => [e.bloque.competenciaCodigo, e.info.actividadProyecto, e.info.resultadoAprendizaje, e.info.descripcionActividad].join('|');
   const puedeUnirse = (prev: EventoUnido, sig: EventoUnido) =>
     prev.bloque.diaSemana === sig.bloque.diaSemana
-    && prev.bloque.fechaCorteInicio === sig.bloque.fechaCorteInicio
-    && prev.bloque.fechaCorteFin === sig.bloque.fechaCorteFin
+    && prev.fechaInicia === sig.fechaInicia
+    && prev.fechaFinaliza === sig.fechaFinaliza
     && claveInstructor(prev.bloque) === claveInstructor(sig.bloque)
     && claveContenido(prev) === claveContenido(sig)
     && minutosDe(prev.horaFinaliza) === minutosDe(sig.horaInicia);
@@ -430,7 +436,7 @@ export async function generarFormatoEventos(
   });
 
   eventos.forEach(ev => {
-    const { bloque, horaInicia, horaFinaliza, horasEjecutadas, info } = ev;
+    const { bloque, horaInicia, horaFinaliza, fechaInicia, fechaFinaliza, horasEjecutadas, info } = ev;
     // Cada RAP de la competencia del bloque va en su propia fila; si por
     // algún motivo no se pudo resolver ningún RAP, se deja una sola fila
     // con el texto consolidado que ya trae `info`.
@@ -449,8 +455,8 @@ export async function generarFormatoEventos(
         esPrimerBloqueGlobal && i === 0 ? (Number(ficha.numero_ficha) || ficha.numero_ficha) : '',
         esPrimerBloqueGlobal && i === 0 ? ficha.programaNombre : '',
         esPrimerBloqueGlobal && i === 0 ? `${ficha.programaCodigo}` : '',
-        i === 0 ? bloque.fechaCorteInicio : '',
-        i === 0 ? bloque.fechaCorteFin : '',
+        i === 0 ? fechaInicia : '',
+        i === 0 ? fechaFinaliza : '',
         i === 0 ? horaInicia : '',
         i === 0 ? horaFinaliza : '',
         i === 0 ? (info.actividadProyecto || '') : '',
@@ -547,7 +553,7 @@ export async function generarFormatoEventos(
   caja(3, 13, 3, N, '', valorBox);
 
   // Fila 4: nota metodológica.
-  caja(4, 4, 4, N, 'Horas ejecutadas = duración del bloque × número de veces que cae ese día entre las fechas del evento, excluyendo festivos de Colombia.', {
+  caja(4, 4, 4, N, 'Fechas del evento = primer y último día de clase de ese día de la semana (sin festivos). Horas ejecutadas = duración × número de clases en ese rango, excluyendo festivos de Colombia.', {
     fuente: { italic: true, size: 9, color: { argb: PALETA.gris } }, relleno: PALETA.blanco,
     alineacion: { horizontal: 'left', vertical: 'middle', indent: 1, wrapText: true }, borde: PALETA.borde
   });
