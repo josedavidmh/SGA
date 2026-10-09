@@ -112,7 +112,7 @@ export const DashboardView: React.FC<DashboardProps> = ({
     const catalogoRapsPrograma = raps.filter(r => r.programaCodigo === f.programaCodigo);
     generarFormatoEventos(f, centro, aplicarCalendarioABloques(bloquesTrimestre, trimestresCalendario), catalogoRapsPrograma, etiquetaTrimestre(trimestre)).then(resultado => {
       if (resultado.festivosTotalesExcluidos > 0) {
-        alert(`Reporte generado. Se excluyeron ${resultado.festivosTotalesExcluidos} ocurrencia(s) por caer en día festivo colombiano.`);
+        alert(`Reporte generado. Se excluyeron ${resultado.festivosTotalesExcluidos} día(s) festivo(s) colombiano(s) del trimestre.`);
       }
     });
   };

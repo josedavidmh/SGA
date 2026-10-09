@@ -332,7 +332,7 @@ export const AvanceFichasView: React.FC<AvanceFichasViewProps> = ({
     const catalogoRapsPrograma = raps.filter(r => r.programaCodigo === fichaToExport.programaCodigo);
     generarFormatoEventos(fichaToExport, centro, aplicarCalendarioABloques(bloquesTrimestre, trimestresCalendario), catalogoRapsPrograma, etiquetaTrimestre(trimestre)).then(resultado => {
       if (resultado.festivosTotalesExcluidos > 0) {
-        alert(`Reporte generado. Se excluyeron ${resultado.festivosTotalesExcluidos} ocurrencia(s) por caer en día festivo colombiano — no se contaron como horas ejecutadas.`);
+        alert(`Reporte generado. Se excluyeron ${resultado.festivosTotalesExcluidos} día(s) festivo(s) colombiano(s) del trimestre — no se contaron como horas ejecutadas.`);
       }
     });
   };

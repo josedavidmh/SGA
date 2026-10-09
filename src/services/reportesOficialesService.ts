@@ -383,7 +383,9 @@ export async function generarFormatoEventos(
 
   const detalleHoras: DetalleHorasEvento[] = [];
   let totalHorasEjecutadas = 0;
-  let festivosTotalesExcluidos = 0;
+  // Festivos DISTINTOS que cayeron en días con clase: un mismo festivo afecta a todos los
+  // bloques de ese día de la semana, pero se cuenta una sola vez.
+  const festivosDistintos = new Set<string>();
 
   // Filas de encabezado fijas antes de la tabla de datos (1-indexado, como
   // usa ExcelJS): 1..4 encabezado institucional, 5 en blanco, 6 títulos de
@@ -424,7 +426,7 @@ export async function generarFormatoEventos(
     const fechaFinaliza = ultimaFechaHabil ? fechaISOLocal(ultimaFechaHabil) : bloque.fechaCorteFin;
     const horasEjecutadas = ocurrenciasHabiles * (bloque.duracionHoras || 0);
     totalHorasEjecutadas += horasEjecutadas;
-    festivosTotalesExcluidos += festivosExcluidos.length;
+    festivosExcluidos.forEach(f => festivosDistintos.add(fechaISOLocal(f)));
     detalleHoras.push({
       bloqueId: bloque.id,
       diaSemana: bloque.diaSemana,
@@ -435,6 +437,8 @@ export async function generarFormatoEventos(
     });
     return { bloque, horaInicia, horaFinaliza, fechaInicia, fechaFinaliza, horasEjecutadas, info: resolverInfoEvento(bloque, catalogoRaps), bloquesUnidos: 1 };
   });
+
+  const festivosTotalesExcluidos = festivosDistintos.size;
 
   // Une los bloques contiguos (el uno termina cuando empieza el otro) del mismo
   // día, con las mismas fechas, el mismo instructor y el mismo contenido
